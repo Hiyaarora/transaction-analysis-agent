@@ -17,7 +17,8 @@ pytestmark = pytest.mark.skipif(os.getenv("RUN_LIVE_LLM") != "1", reason="set RU
 
 def test_gemini_accepts_plan_schema_and_returns_a_parseable_plan():
     settings = load_settings()
-    client = GeminiClient(settings.gemini_api_key, settings.gemini_model, settings.gemini_fallback_model)
+    client = GeminiClient(settings.gemini_api_key, settings.gemini_model, settings.gemini_fallback_model,
+                 backup_api_key=settings.gemini_api_key_2)
     text = client.complete_json(
         system=(
             "You translate questions into an analysis plan as JSON matching the schema. "

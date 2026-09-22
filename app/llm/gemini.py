@@ -1,9 +1,24 @@
 """Gemini provider. The only module allowed to import `google.genai`.
 
 Sends the planner's prompt with a JSON schema for constrained decoding and
-returns the raw text. On a rate limit it retries once on the fallback model.
-Every SDK failure surfaces as `LLMError`.
+returns the raw text. Every SDK failure surfaces as `LLMError`.
+
+Two failures are worth retrying: a rate limit (429), because the free tier is
+small, and "this model is experiencing high demand" (503), which is transient
+and common on the flash models. The client walks a fixed sequence of attempts
+and stops at the first success:
+
+    (primary key, primary model) -> (primary key, fallback model)
+    -> (backup key, primary model) -> (backup key, fallback model)
+
+The fallback model is optional; with none configured the chain is just the
+two keys. Anything else - a bad request, or a 404 because the model is not
+available to this account - is a real failure and is raised immediately
+rather than burning quota on a retry.
 """
+
+from collections.abc import Callable, Iterator
+from typing import Any
 
 from google import genai
 from google.genai import errors as genai_errors
@@ -11,7 +26,8 @@ from google.genai import types
 
 from app.llm.base import LLMClient, LLMError
 
-_RATE_LIMITED = 429
+# Transient conditions worth trying the next key or model for.
+_RETRYABLE = (429, 503)
 
 
 class GeminiClient(LLMClient):
@@ -22,14 +38,19 @@ class GeminiClient(LLMClient):
         api_key: str | None,
         model: str,
         fallback_model: str | None = None,
-        sdk: genai.Client | None = None,
+        backup_api_key: str | None = None,
+        sdk_factory: Callable[[str], Any] | None = None,
     ) -> None:
         if not api_key:
             raise LLMError("GEMINI_API_KEY is not set. Add it to .env.")
         self.model = model
         self.fallback_model = fallback_model if fallback_model and fallback_model != model else None
-        # Injectable so tests can stub the SDK; built once because it owns a connection pool.
-        self._sdk = sdk or genai.Client(api_key=api_key)
+        self.backup_configured = bool(backup_api_key and backup_api_key != api_key)
+
+        build = sdk_factory or (lambda key: genai.Client(api_key=key))
+        keys = [api_key] + ([backup_api_key] if self.backup_configured else [])
+        # Clients are built once: each owns a connection pool.
+        self._sdks = [build(key) for key in keys]
 
     def complete_json(self, *, system: str, user: str, schema: dict) -> str:
         config = types.GenerateContentConfig(
@@ -42,16 +63,26 @@ class GeminiClient(LLMClient):
             # We pass no tools; without this the SDK logs an AFC warning on every call.
             automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
         )
-        try:
-            return self._generate(self.model, user, config)
-        except LLMError as primary:
-            if self.fallback_model is None or getattr(primary, "code", None) != _RATE_LIMITED:
-                raise
-            return self._generate(self.fallback_model, user, config)
 
-    def _generate(self, model: str, user: str, config: types.GenerateContentConfig) -> str:
+        transient: LLMError | None = None
+        for sdk, model in self._attempts():
+            try:
+                return self._generate(sdk, model, user, config)
+            except _LLMApiError as exc:
+                if exc.code not in _RETRYABLE:
+                    raise
+                transient = exc  # try the next key or model
+        raise transient  # every attempt hit a transient failure
+
+    def _attempts(self) -> Iterator[tuple[Any, str]]:
+        for sdk in self._sdks:
+            yield sdk, self.model
+            if self.fallback_model:
+                yield sdk, self.fallback_model
+
+    def _generate(self, sdk: Any, model: str, user: str, config: types.GenerateContentConfig) -> str:
         try:
-            response = self._sdk.models.generate_content(model=model, contents=user, config=config)
+            response = sdk.models.generate_content(model=model, contents=user, config=config)
         except genai_errors.APIError as exc:
             raise _LLMApiError(f"Gemini error {exc.code} on {model}: {exc.message}", code=exc.code) from exc
         text = response.text
@@ -61,7 +92,7 @@ class GeminiClient(LLMClient):
 
 
 class _LLMApiError(LLMError):
-    """LLMError that remembers the HTTP status, so the fallback decision can see it."""
+    """LLMError that remembers the HTTP status, so the retry decision can see it."""
 
     def __init__(self, message: str, code: int | None) -> None:
         super().__init__(message)

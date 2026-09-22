@@ -220,16 +220,18 @@ run.py
 | Variable | Default | Purpose |
 |---|---|---|
 | `GEMINI_API_KEY` | – | required |
-| `GEMINI_MODEL` | `gemini-2.5-flash` | planning model |
-| `GEMINI_FALLBACK_MODEL` | `gemini-2.5-flash-lite` | tried once on a rate limit; empty disables |
+| `GEMINI_API_KEY_2` | – | optional second key, tried automatically when the first is rate limited |
+| `GEMINI_MODEL` | `gemini-3.6-flash` | planning model |
+| `GEMINI_FALLBACK_MODEL` | none | optional second model, tried on a 429 or 503 |
 | `LLM_PROVIDER` | `gemini` | the provider sits behind an `LLMClient` interface |
 
 ## Limitations
 
 * **Free-tier quota.** Gemini's free tier allows roughly 20 planning requests
-  per day per key, after which questions return an honest
-  `Status: Error` rather than an answer. Enabling billing on the key removes
-  the limit; a question costs roughly 1,450 tokens.
+  per day per key, after which questions return an honest `Status: Error`
+  rather than an answer. Setting `GEMINI_API_KEY_2` doubles the ceiling (the
+  client rotates to it on a 429) but does not remove it; enabling billing on a
+  key does. A question costs roughly 1,450 tokens.
 * Plan quality depends on the model. The architecture guarantees that a bad
   plan is *rejected*, not that every question produces one.
 * Answers are single values, grouped values or an extreme — the agent does not

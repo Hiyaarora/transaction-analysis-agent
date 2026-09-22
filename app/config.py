@@ -15,6 +15,8 @@ from dotenv import load_dotenv
 class Settings:
     llm_provider: str
     gemini_api_key: str | None
+    #: Optional second key, tried when the first is rate limited.
+    gemini_api_key_2: str | None
     gemini_model: str
     gemini_fallback_model: str | None
 
@@ -26,13 +28,16 @@ def load_settings(dotenv_path: str | Path | None = ".env") -> Settings:
     return Settings(
         llm_provider=os.getenv("LLM_PROVIDER", "gemini"),
         gemini_api_key=os.getenv("GEMINI_API_KEY") or None,
-        gemini_model=os.getenv("GEMINI_MODEL") or "gemini-2.5-flash",
+        gemini_api_key_2=os.getenv("GEMINI_API_KEY_2") or None,
+        gemini_model=os.getenv("GEMINI_MODEL") or "gemini-3.6-flash",
         # Empty string opts out of the fallback; unset keeps the default.
         gemini_fallback_model=_fallback(os.getenv("GEMINI_FALLBACK_MODEL")),
     )
 
 
 def _fallback(raw: str | None) -> str | None:
-    if raw is None:
-        return "gemini-2.5-flash-lite"
+    """No second model by default: resilience comes from the optional second key.
+
+    Set GEMINI_FALLBACK_MODEL to add one. Empty string also means "none".
+    """
     return raw or None

@@ -31,18 +31,28 @@ class _StubModels:
 
 
 class _StubSDK:
-    def __init__(self, outcomes):
+    def __init__(self, outcomes, key="k"):
         self.models = _StubModels(outcomes)
+        self.key = key
 
 
 def _api_error(code: int) -> genai_errors.APIError:
     return genai_errors.APIError(code, {"error": {"message": f"http {code}", "status": "x"}})
 
 
-def make(outcomes, fallback="gemini-2.5-flash-lite"):
-    sdk = _StubSDK(outcomes)
-    client = GeminiClient(api_key="k", model="gemini-2.5-flash", fallback_model=fallback, sdk=sdk)
-    return client, sdk.models
+def make(outcomes, fallback="gemini-2.5-flash-lite", backup_key=None, backup_outcomes=None):
+    """Build a client over one or two stubbed SDKs, and return the call log per key."""
+    sdks = {"k": _StubSDK(outcomes, key="k")}
+    if backup_key:
+        sdks[backup_key] = _StubSDK(backup_outcomes or [], key=backup_key)
+    client = GeminiClient(
+        api_key="k",
+        model="gemini-2.5-flash",
+        fallback_model=fallback,
+        backup_api_key=backup_key,
+        sdk_factory=lambda key: sdks[key],
+    )
+    return client, sdks["k"].models
 
 
 SCHEMA = {"type": "object", "properties": {"a": {"type": "integer"}}}
@@ -73,7 +83,7 @@ def test_sends_system_user_and_schema_and_returns_text():
 
 def test_missing_api_key_is_an_llm_error():
     with pytest.raises(LLMError, match="GEMINI_API_KEY"):
-        GeminiClient(api_key="", model="m", fallback_model=None, sdk=_StubSDK([]))
+        GeminiClient(api_key="", model="m", fallback_model=None, sdk_factory=lambda key: _StubSDK([]))
 
 
 # --- error translation ------------------------------------------------------------
@@ -147,3 +157,70 @@ def test_automatic_function_calling_is_disabled():
     client, models = make(["{}"])
     client.complete_json(system="s", user="u", schema=SCHEMA)
     assert models.calls[0]["config"].automatic_function_calling.disable is True
+
+
+# --- second API key ------------------------------------------------------------------
+
+
+def _client_with_two_keys(primary_outcomes, backup_outcomes):
+    sdks = {"key1": _StubSDK(primary_outcomes, key="key1"), "key2": _StubSDK(backup_outcomes, key="key2")}
+    client = GeminiClient(
+        api_key="key1",
+        model="gemini-2.5-flash",
+        fallback_model="gemini-2.5-flash-lite",
+        backup_api_key="key2",
+        sdk_factory=lambda key: sdks[key],
+    )
+    return client, sdks
+
+
+def test_second_key_is_used_only_after_the_first_key_is_rate_limited():
+    client, sdks = _client_with_two_keys([_api_error(429), _api_error(429)], ['{"a": 3}'])
+    assert client.complete_json(system="s", user="u", schema=SCHEMA) == '{"a": 3}'
+    # First key: both models tried. Second key: primary model, which succeeded.
+    assert [c["model"] for c in sdks["key1"].models.calls] == ["gemini-2.5-flash", "gemini-2.5-flash-lite"]
+    assert [c["model"] for c in sdks["key2"].models.calls] == ["gemini-2.5-flash"]
+
+
+def test_second_key_is_not_touched_when_the_first_succeeds():
+    client, sdks = _client_with_two_keys(['{"a": 1}'], ['{"a": 2}'])
+    assert client.complete_json(system="s", user="u", schema=SCHEMA) == '{"a": 1}'
+    assert sdks["key2"].models.calls == []
+
+
+def test_second_key_is_not_tried_for_a_non_rate_limit_error():
+    client, sdks = _client_with_two_keys([_api_error(400)], ['{"a": 2}'])
+    with pytest.raises(LLMError, match="400"):
+        client.complete_json(system="s", user="u", schema=SCHEMA)
+    assert sdks["key2"].models.calls == []
+
+
+def test_exhausting_every_key_and_model_raises_the_last_rate_limit():
+    client, sdks = _client_with_two_keys([_api_error(429)] * 2, [_api_error(429)] * 2)
+    with pytest.raises(LLMError, match="429"):
+        client.complete_json(system="s", user="u", schema=SCHEMA)
+    assert len(sdks["key1"].models.calls) == 2
+    assert len(sdks["key2"].models.calls) == 2
+
+
+def test_a_blank_backup_key_is_ignored():
+    client, _ = make(["{}"], backup_key=None)
+    assert client.backup_configured is False
+
+
+def test_high_demand_is_retried_like_a_rate_limit():
+    # 503 "model is currently experiencing high demand" is transient; observed
+    # on several Gemini flash models. Treat it as retryable, not as a failure.
+    # This helper configures a fallback model, so the first key gets two attempts.
+    client, sdks = _client_with_two_keys([_api_error(503), _api_error(503)], ['{"a": 9}'])
+    assert client.complete_json(system="s", user="u", schema=SCHEMA) == '{"a": 9}'
+    assert len(sdks["key1"].models.calls) == 2
+    assert len(sdks["key2"].models.calls) == 1
+
+
+def test_not_found_is_not_retried():
+    # 404 means the model is unavailable to this account; retrying wastes quota.
+    client, sdks = _client_with_two_keys([_api_error(404)], ['{"a": 9}'])
+    with pytest.raises(LLMError, match="404"):
+        client.complete_json(system="s", user="u", schema=SCHEMA)
+    assert sdks["key2"].models.calls == []

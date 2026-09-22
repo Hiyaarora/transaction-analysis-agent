@@ -166,7 +166,12 @@ def _parse(argv: list[str]) -> argparse.Namespace:
 
 def _build_llm(use_dotenv: bool) -> LLMClient:
     settings = load_settings(dotenv_path=".env" if use_dotenv else None)
-    return GeminiClient(settings.gemini_api_key, settings.gemini_model, settings.gemini_fallback_model)
+    return GeminiClient(
+        settings.gemini_api_key,
+        settings.gemini_model,
+        settings.gemini_fallback_model,
+        backup_api_key=settings.gemini_api_key_2,
+    )
 
 
 def main() -> int:  # pragma: no cover - thin wrapper around run()

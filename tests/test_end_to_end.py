@@ -196,7 +196,8 @@ def test_live_every_embedded_question_produces_a_sane_outcome(dataset):
 
     settings = load_settings()
     agent = Agent(dataset, GeminiClient(settings.gemini_api_key, settings.gemini_model,
-                                        settings.gemini_fallback_model))
+                                        settings.gemini_fallback_model,
+                                        backup_api_key=settings.gemini_api_key_2))
     answered = 0
     for question in dataset.questions:
         response = agent.ask(question)
