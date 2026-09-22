@@ -15,8 +15,24 @@ pydantic>=2.7,<3
 # code or in the planner prompt.
 python-dotenv>=1.0
 
+# --- web API (the React UI's backend; the CLI does not need these) ---
+
+# HTTP adapter around the existing Agent. Chosen over a hand-rolled server for
+# request validation and typed response models, which keep the wire contract
+# honest without extra code.
+fastapi>=0.141,<1
+
+# ASGI server for `python run_api.py`.
+uvicorn[standard]>=0.53,<1
+
+# Multipart parsing: without it FastAPI cannot accept an uploaded file.
+python-multipart>=0.0.32
+
 # --- test dependencies ---
 pytest>=8.0
+
+# Starlette's TestClient requires httpx2; plain httpx is deprecated for it.
+httpx2>=2.12
 
 # Gemini SDK — imported only by app/llm/gemini.py. Passing our Pydantic plan
 # schema as response_json_schema gives constrained JSON decoding; parse_plan
