@@ -265,3 +265,69 @@ describe("custom questions", () => {
     expect(result.queryByText(/operations performed/i)).not.toBeInTheDocument();
   });
 });
+
+describe("when the backend is unreachable", () => {
+  it("reports an ask that could not be sent, without inventing an answer", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(datasetFixture()));
+    render(<App />);
+    await userEvent.click(screen.getByRole("button", { name: /use assessment dataset/i }));
+    await screen.findByRole("region", { name: /active dataset/i });
+
+    fetchMock.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    await userEvent.type(screen.getByRole("textbox", { name: /ask your own question/i }), "anything");
+    await userEvent.click(screen.getByRole("button", { name: /^ask$/i }));
+
+    const result = within(await screen.findByRole("region", { name: /result/i }));
+    expect(result.getByText(/something went wrong/i)).toBeInTheDocument();
+    expect(result.getByText(/could not reach the analysis server/i)).toBeInTheDocument();
+    expect(result.queryByText(/operations performed/i)).not.toBeInTheDocument();
+  });
+
+  it("does not cache a failure, so the next attempt really retries", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(datasetFixture()));
+    render(<App />);
+    await userEvent.click(screen.getByRole("button", { name: /use assessment dataset/i }));
+    await screen.findByRole("region", { name: /active dataset/i });
+
+    const input = screen.getByRole("textbox", { name: /ask your own question/i });
+    await userEvent.type(input, "anything");
+
+    fetchMock.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    await userEvent.click(screen.getByRole("button", { name: /^ask$/i }));
+    await screen.findByText(/something went wrong/i);
+
+    fetchMock.mockResolvedValueOnce(jsonResponse(SCALAR_ANSWER));
+    await userEvent.click(screen.getByRole("button", { name: /^ask$/i }));
+
+    expect(await screen.findByText("1,234.50")).toBeInTheDocument();
+    expect(fetchMock.mock.calls.filter(([url]) => url === "/api/ask")).toHaveLength(2);
+  });
+});
+
+describe("replacing the dataset", () => {
+  it("clears a custom answer computed from the previous dataset", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(datasetFixture()));
+    render(<App />);
+    await userEvent.click(screen.getByRole("button", { name: /use assessment dataset/i }));
+    await screen.findByRole("region", { name: /active dataset/i });
+
+    fetchMock.mockResolvedValueOnce(jsonResponse(SCALAR_ANSWER));
+    await userEvent.type(screen.getByRole("textbox", { name: /ask your own question/i }), "my question");
+    await userEvent.click(screen.getByRole("button", { name: /^ask$/i }));
+    expect(await screen.findByText("1,234.50")).toBeInTheDocument();
+
+    // A different file is loaded: an answer computed from the old one must not
+    // remain on screen next to the new dataset's profile.
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(datasetFixture({ source_name: "different.csv", row_count: 3 })),
+    );
+    await userEvent.upload(
+      screen.getByLabelText(/upload a csv file/i),
+      new File(["id\n"], "different.csv", { type: "text/csv" }),
+    );
+
+    await waitFor(() => expect(screen.getByText("different.csv")).toBeInTheDocument());
+    expect(screen.queryByText("1,234.50")).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: /result/i })).not.toBeInTheDocument();
+  });
+});

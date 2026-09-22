@@ -6,7 +6,7 @@
  *  ResultView.
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Session } from "../hooks/useSession";
 import type { AskResponse } from "../types/api";
 import { ResultView } from "./ResultView";
@@ -18,6 +18,13 @@ export function CustomQuestion({ session }: { session: Session }) {
   const [pending, setPending] = useState(false);
 
   const question = text.trim();
+
+  // An answer belongs to the dataset it was computed from. When the active
+  // dataset is replaced, leaving it on screen would show one file's numbers
+  // beside another file's profile.
+  useEffect(() => {
+    setResult(null);
+  }, [session.datasetToken]);
 
   async function ask() {
     if (!question) return;

@@ -20,6 +20,16 @@ The result was computed deterministically in Python from the active dataset
 (project_4.csv); the language model only chose which operations to run.
 ```
 
+Two front ends, one engine:
+
+```
+                      terminal  (python run.py)
+Agent  ---------------+
+                      web UI  (React) -> FastAPI
+```
+
+Both drive the same `Agent`, so they cannot give different answers.
+
 ## The idea
 
 The boundary between probabilistic reasoning and deterministic computation is
@@ -85,6 +95,24 @@ Ready. Ask a question, or /help for commands.
 Commands: `/help`, `/profile`, `/questions`, `/load <path>`, `/exit`. The
 dataset is loaded once and every question runs against it until you `/load`
 another.
+
+### The web interface
+
+Two processes: the API, and the Vite dev server that proxies `/api` to it.
+
+```bash
+python run_api.py                      # terminal 1 - http://127.0.0.1:8000
+cd frontend && npm install && npm run dev   # terminal 2 - http://localhost:5173
+```
+
+Open http://localhost:5173, choose the assessment dataset or upload a CSV,
+then step through the questions the file carries or ask your own. Answers
+already obtained are cached in the browser, so paging back and forth through
+them costs no further API calls.
+
+The React app never sees an API key, never performs a calculation, and
+contains no logic tied to any particular question: it renders the structured
+response and nothing else.
 
 ## What it can answer
 
@@ -178,8 +206,12 @@ there being no expressible operation outside those six tools.
 ## Testing
 
 ```bash
-python -m pytest -W error          # 350 passed, 2 skipped
+python -m pytest                   # 388 passed, 2 skipped (warnings are errors)
 RUN_LIVE_LLM=1 python -m pytest    # also runs the two tests that call Gemini
+
+cd frontend
+npx vitest run                     # 45 passed
+npx tsc --noEmit                   # no type errors
 ```
 
 Every test but two runs without a network or an API key: a `FakeLLMClient`
@@ -210,10 +242,37 @@ app/
   renderer.py      answer / operations performed / explanation
   cli.py           the interactive session
   llm/             provider interface, Gemini implementation, test double
+  api/             the HTTP adapter: five endpoints, a wire schema, sessions
 data/project_4.csv
-tests/             350 tests
-run.py
+tests/             388 tests
+frontend/src/
+  api/client.ts    the only module that speaks HTTP
+  types/api.ts     the wire contract, mirroring app/api/schemas.py
+  hooks/           session id, active dataset, answer cache
+  components/      dataset panel, question runner, result display
+run.py             the terminal session
+run_api.py         the web API
 ```
+
+### The HTTP adapter
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/api/health` | is the server up, is a key configured |
+| `POST` | `/api/dataset/assessment` | load the bundled dataset |
+| `POST` | `/api/dataset/upload` | load an uploaded CSV |
+| `GET` | `/api/dataset` | the active dataset for this session |
+| `POST` | `/api/ask` | ask a question |
+
+Each handler looks up a session, calls an existing function and converts the
+result; a test asserts that nothing under `app/api` touches pandas or calls
+the executor, validator, tools or planner directly. Sessions are per browser
+tab, held in memory, identified by a UUID the client sends in `X-Session-Id`.
+
+An uploaded file never becomes a path the agent can reach: the browser sends
+bytes, the server names its own temporary file and deletes it as soon as the
+loader has read it - after a failure as well as a success. A failed upload
+leaves the previous dataset active.
 
 ## Configuration
 
