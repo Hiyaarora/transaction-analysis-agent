@@ -1,0 +1,50 @@
+@import "tailwindcss";
+
+/* One dark palette, defined once. Everything is monochrome except a single
+   warm-to-cool accent used on the title and the primary action. */
+@theme {
+  --color-canvas: #0a0a0b;
+  --color-panel: #111113;
+  --color-raised: #17171a;
+  --color-line: #232326;
+  --color-line-strong: #34343a;
+  --color-ink: #ededef;
+  --color-muted: #8b8b94;
+  --color-faint: #5c5c66;
+  --color-accent: #f0873a;
+  --color-accent-cool: #7bb8f0;
+  --color-positive: #5fc98a;
+  --color-warning: #e3b341;
+  --color-danger: #f0736a;
+
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background-color: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Small upper-case mono labels: "DATASET", "QUESTION 3 OF 10". */
+@utility label {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-faint);
+}
+
+@utility accent-text {
+  background-image: linear-gradient(100deg, var(--color-accent), var(--color-accent-cool));
+  background-clip: text;
+  color: transparent;
+}
