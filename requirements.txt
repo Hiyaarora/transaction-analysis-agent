@@ -1,0 +1,24 @@
+# Runtime dependencies. Every entry must justify itself.
+
+# DataFrame engine. All deterministic computation (filter/aggregate/group)
+# runs through pandas so the LLM never has to do arithmetic. Pinned to the
+# major version installed locally: pandas 3 defaults to the `str` dtype and
+# copy-on-write, both of which change behaviour vs. pandas 2.
+pandas==3.0.5
+
+# Schema validation for the LLM's analysis plan. Closed Literal/Enum fields
+# are the first security boundary: an unknown tool name fails here, before
+# any code path can run it.
+pydantic>=2.7,<3
+
+# Loads LLM provider settings (key, model) from .env so no secret is ever in
+# code or in the planner prompt.
+python-dotenv>=1.0
+
+# --- test dependencies ---
+pytest>=8.0
+
+# Gemini SDK — imported only by app/llm/gemini.py. Passing our Pydantic plan
+# schema as response_json_schema gives constrained JSON decoding; parse_plan
+# still validates every reply, so this is an optimisation, not the guarantee.
+google-genai>=2.24,<3

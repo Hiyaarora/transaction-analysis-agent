@@ -1,0 +1,21 @@
+# virtual environment
+.venv/
+
+# python artefacts
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# secrets — .env.example is committed, .env never is
+.env
+
+# editor / OS noise
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Working notes kept locally, not part of the submission
+DATA_CONTRACT.md
+TEST_PLAN.md
+docs/
