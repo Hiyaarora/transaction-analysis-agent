@@ -1,4 +1,5 @@
 import { DatasetPanel } from "./components/DatasetPanel";
+import { CustomQuestion } from "./components/CustomQuestion";
 import { QuestionRunner } from "./components/QuestionRunner";
 import { useSession } from "./hooks/useSession";
 import { Panel } from "./components/ui";
@@ -23,7 +24,14 @@ export default function App() {
       <main className="mx-auto grid max-w-7xl gap-6 px-6 py-8 lg:grid-cols-[360px_minmax(0,1fr)]">
         <DatasetPanel session={session} />
         <div className="flex flex-col gap-6">
-          {session.dataset ? <QuestionRunner session={session} /> : <EmptyState />}
+          {session.dataset ? (
+            <>
+              <QuestionRunner session={session} />
+              <CustomQuestion session={session} />
+            </>
+          ) : (
+            <EmptyState />
+          )}
         </div>
       </main>
     </div>

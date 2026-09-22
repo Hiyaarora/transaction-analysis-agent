@@ -63,7 +63,7 @@ export function QuestionRunner({ session }: { session: Session }) {
 
       {result && (
         <div className="mt-5">
-          <ResultView result={result} />
+          <ResultView result={result} dataset={session.dataset!} />
         </div>
       )}
 
