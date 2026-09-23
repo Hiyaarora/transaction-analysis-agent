@@ -136,18 +136,18 @@ def test_many_questions_against_one_active_dataset(dataset):
     count_uk = plan({"tool": "filter_rows", "column": "region", "op": "eq", "value": "UK"},
                     {"tool": "aggregate", "column": "id", "func": "count"})
     agent, fake = agent_with(dataset, UK_SUM, count_uk)
-    assert agent.ask("q1").execution.scalar.value == 2180.0
-    assert agent.ask("q2").execution.scalar.value == 2
+    assert agent.ask("revenue for UK").execution.scalar.value == 2180.0
+    assert agent.ask("how many UK transactions").execution.scalar.value == 2
     assert fake.calls[0].system == fake.calls[1].system  # same dataset context, built once
 
 
 def test_loading_a_new_dataset_changes_the_answers(dataset, write_csv):
     agent, fake = agent_with(dataset, UK_SUM, UK_SUM)
-    assert agent.ask("q").execution.scalar.value == 2180.0
+    assert agent.ask("revenue for UK").execution.scalar.value == 2180.0
 
     v2 = load_dataset(write_csv(["T9,2026-05-05,UK,Alpha,1,100,0.00,"], name="v2.csv"))
     agent.load(v2)
-    assert agent.ask("q").execution.scalar.value == 100.0
+    assert agent.ask("revenue for UK").execution.scalar.value == 100.0
     assert agent.dataset.source_name == "v2.csv"
     assert "2026-05-05" in fake.calls[1].system  # planner context rebuilt from the new profile
 
@@ -167,3 +167,23 @@ def test_blocked_question_never_reaches_the_llm(dataset):
     assert "cannot run code" in r.message
     assert fake.calls == []
     assert r.plan is None
+
+
+def test_a_category_value_the_user_never_named_becomes_a_clarification(dataset):
+    # The planner resolving "Germany" to DE by itself: a valid region, so only
+    # the question's own words can reveal the substitution.
+    agent, _ = agent_with(dataset, plan(
+        {"tool": "filter_rows", "column": "region", "op": "eq", "value": "DE"},
+        {"tool": "aggregate", "column": "id", "func": "count"}))
+    response = agent.ask("What is the total revenue for products from Germany?")
+    assert response.status == "clarification_required"
+    assert "DE" in response.message
+    assert response.execution is None
+
+
+def test_the_same_plan_is_fine_when_the_user_named_the_region(dataset):
+    agent, _ = agent_with(dataset, plan(
+        {"tool": "filter_rows", "column": "region", "op": "eq", "value": "DE"},
+        {"tool": "aggregate", "column": "id", "func": "count"}))
+    response = agent.ask("How many DE transactions are there?")
+    assert response.status == "success"

@@ -282,3 +282,64 @@ def test_first_problem_is_reported(profile):
     out = outcome(profile, filt("profit", "gt", 0), filt("region", "eq", "Mars"), COUNT)
     assert "profit" in out.rejection_reason
     assert "Mars" not in out.rejection_reason
+
+
+# --- a category value must come from the question ------------------------------------
+#
+# The planner is told never to map a synonym onto a category value, but a rule
+# in a prompt is a tendency, not a guarantee: gpt-oss-120b answered "revenue
+# for products from Germany" by filtering region = DE, three times out of three.
+# The semantic checks above cannot see that, because DE is a perfectly valid
+# region - the substitution happened before the plan was built. So the plan is
+# also checked against the words the user actually used.
+
+
+def ask(profile, question, *steps):
+    return validate(parse_plan(success(*steps)), profile, question=question)
+
+
+def test_a_value_the_user_named_is_accepted(profile):
+    assert ask(profile, "What is the total revenue for UK transactions?",
+               filt("region", "eq", "UK"), COUNT).status == "valid"
+
+
+def test_the_match_ignores_case(profile):
+    assert ask(profile, "how much revenue came from uk?", filt("region", "eq", "UK"), COUNT).status == "valid"
+
+
+def test_a_value_the_user_never_named_asks_for_clarification(profile):
+    outcome = ask(profile, "Can you tell me the total revenue for products from Germany?",
+                  filt("region", "eq", "DE"), COUNT)
+    assert outcome.status == "clarification_required"
+    assert "Germany" not in outcome.clarification_question  # we do not guess what they meant
+    assert "DE" in outcome.clarification_question and "FR" in outcome.clarification_question
+
+
+def test_every_value_in_a_list_must_be_named(profile):
+    assert ask(profile, "revenue for UK and FR", filt("region", "in", ["UK", "FR"]), COUNT).status == "valid"
+    assert ask(profile, "revenue for UK and Germany",
+               filt("region", "in", ["UK", "DE"]), COUNT).status == "clarification_required"
+
+
+def test_a_code_inside_another_word_does_not_count_as_naming_it(profile):
+    # "DE" appears inside "Denmark"; the user did not name the region DE.
+    outcome = ask(profile, "What is the total revenue for Denmark?", filt("region", "eq", "DE"), COUNT)
+    assert outcome.status == "clarification_required"
+
+
+def test_punctuation_around_a_value_is_fine(profile):
+    assert ask(profile, "revenue for 'UK'?", filt("region", "eq", "UK"), COUNT).status == "valid"
+    assert ask(profile, "What are Alpha's total units?", filt("product", "eq", "Alpha"), COUNT).status == "valid"
+
+
+def test_numeric_and_date_filters_are_not_subject_to_this_check(profile):
+    # "20%" becomes 0.2 and "January" becomes a date: neither appears literally.
+    assert ask(profile, "how many transactions used a 20% discount?",
+               filt("discount", "eq", 0.2), COUNT).status == "valid"
+    assert ask(profile, "revenue between January 1 and February 15",
+               filt("date", "between", ["2026-01-01", "2026-02-15"]), COMPUTE, SUM_REV).status == "valid"
+
+
+def test_without_the_question_the_check_is_skipped(profile):
+    # validate() is usable without a question; the agent always supplies one.
+    assert validate(parse_plan(success(filt("region", "eq", "DE"), COUNT)), profile).status == "valid"

@@ -305,13 +305,13 @@ def test_an_empty_question_is_rejected(client):
 @with_llm(COUNT_UK, COUNT_UK)
 def test_answers_follow_the_active_dataset(client):
     client.post("/api/dataset/assessment", headers=headers())
-    first = client.post("/api/ask", headers=headers(), json={"question": "q"}).json()
+    first = client.post("/api/ask", headers=headers(), json={"question": "how many UK transactions"}).json()
 
     client.post("/api/dataset/upload", headers=headers(),
                 files={"file": ("v2.csv", csv_bytes(
                     "T1,2027-01-01,UK,Alpha,1,100,0.00,",
                     "T2,2027-01-02,UK,Alpha,1,100,0.00,"), "text/csv")})
-    second = client.post("/api/ask", headers=headers(), json={"question": "q"}).json()
+    second = client.post("/api/ask", headers=headers(), json={"question": "how many UK transactions"}).json()
 
     assert first["execution"]["value"] != second["execution"]["value"]
     assert second["execution"]["value"] == 2

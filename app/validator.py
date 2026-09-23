@@ -25,6 +25,7 @@ normalised copy; every other outcome carries the original plus a reason.
 """
 
 import difflib
+import re
 from dataclasses import dataclass
 from typing import Literal
 
@@ -65,7 +66,13 @@ class _Clarify(Exception):
     pass
 
 
-def validate(plan: AnalysisPlan, profile: DataProfile) -> ValidationOutcome:
+def validate(plan: AnalysisPlan, profile: DataProfile, question: str = "") -> ValidationOutcome:
+    """Check `plan` against the dataset, and against the words of `question`.
+
+    `question` is optional so the validator can be exercised on its own, but
+    the agent always supplies it: without it, a value the user never wrote
+    cannot be detected.
+    """
     # The planner's own decision to ask or refuse is honoured as-is.
     if plan.status == "clarification_required":
         return ValidationOutcome("clarification_required", plan, clarification_question=plan.clarification_question)
@@ -73,7 +80,7 @@ def validate(plan: AnalysisPlan, profile: DataProfile) -> ValidationOutcome:
         return ValidationOutcome("rejected", plan, rejection_reason=plan.rejection_reason)
 
     try:
-        steps = _Walk(profile).run(plan)
+        steps = _Walk(profile, question).run(plan)
     except _Reject as exc:
         return ValidationOutcome("rejected", plan, rejection_reason=str(exc))
     except _Clarify as exc:
@@ -88,8 +95,9 @@ def validate(plan: AnalysisPlan, profile: DataProfile) -> ValidationOutcome:
 class _Walk:
     """State carried from one step to the next: which columns exist, what stage we are at."""
 
-    def __init__(self, profile: DataProfile) -> None:
+    def __init__(self, profile: DataProfile, question: str = "") -> None:
         self.profile = profile
+        self.question = question
         self.stage: Stage = "rows"
         # Only contract columns are addressable. Extra file columns exist but
         # are not supported for analysis; derived metrics appear after compute.
@@ -236,13 +244,32 @@ class _Walk:
     def _resolve_category(self, value: str, column: str, index: int) -> str:
         valid = self.profile.categorical_values.get(column, ())
         if value in valid:
+            self._require_the_user_said_it(value, column, valid)
             return value
         folded = [v for v in valid if v.casefold() == value.strip().casefold()]
         if len(folded) == 1:
+            self._require_the_user_said_it(value, column, valid)
             return folded[0]
         close = difflib.get_close_matches(value, valid, n=3, cutoff=_NEAR_MISS_CUTOFF)
         if close:
             options = " or ".join(f"'{c}'" for c in close)
             raise _Clarify(f"'{value}' is not a {column} in the dataset. Did you mean {options}?")
         raise _Reject(f"Step {index}: '{value}' is not a {column} in this dataset. Values: {', '.join(valid)}.")
+
+    def _require_the_user_said_it(self, value: str, column: str, valid: tuple[str, ...]) -> None:
+        """A valid value the user never wrote means the planner substituted one.
+
+        Matching is on whole words, so a two-letter code is not counted as
+        named because it happens to sit inside another word ("DE" in
+        "Denmark"). The clarification lists the real values and does not repeat
+        the planner's guess: what the user meant is the thing being asked.
+        """
+        if not self.question:
+            return
+        if re.search(rf"\b{re.escape(value)}\b", self.question, re.IGNORECASE):
+            return
+        raise _Clarify(
+            f"Your question does not name a {column} from this dataset. "
+            f"The available {column} values are {', '.join(valid)}. Which did you mean?"
+        )
 

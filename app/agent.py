@@ -55,7 +55,9 @@ class Agent:
         except LLMError as exc:
             return AgentResponse("error", question, message=f"The planning model is unavailable: {exc}")
 
-        outcome = validate(plan, self.dataset.profile)
+        # The question goes in too: a category value the user never wrote
+        # is how a silently mapped synonym shows up.
+        outcome = validate(plan, self.dataset.profile, question=question)
         if outcome.status == "clarification_required":
             return AgentResponse("clarification_required", question, plan, message=outcome.clarification_question)
         if outcome.status == "rejected":

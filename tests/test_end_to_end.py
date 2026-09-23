@@ -38,9 +38,18 @@ def tx(dataset) -> pd.DataFrame:
     return frame
 
 
-def answer(dataset, *steps, intent="t"):
+def answer(dataset, *steps, intent="t", question=None):
+    """Ask with a question that names whatever the steps filter on.
+
+    The validator checks a category value against the words of the question,
+    so a placeholder would (correctly) be read as the planner inventing one.
+    """
     reply = json.dumps({"status": "success", "intent": intent, "steps": list(steps)})
-    return Agent(dataset, FakeLLMClient([reply])).ask("q")
+    if question is None:
+        named = [str(step.get("value")) for step in steps
+                 if step.get("tool") == "filter_rows" and isinstance(step.get("value"), str)]
+        question = "question about " + " and ".join(named) if named else "question"
+    return Agent(dataset, FakeLLMClient([reply])).ask(question)
 
 
 F = lambda column, op, value=None: {"tool": "filter_rows", "column": column, "op": op, "value": value}  # noqa: E731

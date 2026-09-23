@@ -106,7 +106,7 @@ def test_answers_a_question(data_file):
 
 
 def test_many_questions_run_against_one_active_dataset(data_file):
-    _, out = cli(data_file, ["q1", "q2", "/exit"], COUNT_UK, SUM_UNITS)
+    _, out = cli(data_file, ["how many UK transactions", "total units", "/exit"], COUNT_UK, SUM_UNITS)
     assert "Number of transactions in region UK: 2" in out
     assert "Total units across all transactions: 23.00" in out
 
@@ -118,7 +118,7 @@ def test_blank_lines_are_ignored(data_file):
 
 
 def test_provider_failure_does_not_end_the_session(data_file):
-    _, out = cli(data_file, ["q1", "q2", "/exit"], LLMError("quota exceeded"), COUNT_UK)
+    _, out = cli(data_file, ["anything", "how many UK transactions", "/exit"], LLMError("quota exceeded"), COUNT_UK)
     assert "Status: Error" in out
     assert "quota exceeded" in out
     assert "Number of transactions in region UK: 2" in out  # the session carried on
@@ -147,14 +147,14 @@ def test_questions_command_lists_the_embedded_corpus(data_file):
 
 def test_load_replaces_the_active_dataset(data_file, write_csv):
     other = write_csv(["T9,2026-05-05,UK,Alpha,1,100,0.00,"], name="v2.csv")
-    _, out = cli(data_file, ["q1", f"/load {other}", "q2", "/exit"], SUM_UNITS, SUM_UNITS)
+    _, out = cli(data_file, ["total units", f"/load {other}", "total units", "/exit"], SUM_UNITS, SUM_UNITS)
     assert "Total units across all transactions: 23.00" in out  # first dataset
     assert "Total units across all transactions: 1.00" in out   # after the swap
     assert "v2.csv" in out
 
 
 def test_failed_load_keeps_the_previous_dataset(data_file, tmp_path):
-    _, out = cli(data_file, [f"/load {tmp_path / 'missing.csv'}", "q", "/exit"], COUNT_UK)
+    _, out = cli(data_file, [f"/load {tmp_path / 'missing.csv'}", "how many UK transactions", "/exit"], COUNT_UK)
     assert "could not be loaded" in out.lower() or "not found" in out.lower()
     assert "Number of transactions in region UK: 2" in out  # still the original dataset
 
@@ -181,11 +181,11 @@ def test_eof_ends_the_session_cleanly(data_file):
 
 
 def test_output_is_ascii_safe(data_file):
-    _, out = cli(data_file, ["/help", "/profile", "q", "/exit"], COUNT_UK)
+    _, out = cli(data_file, ["/help", "/profile", "how many UK transactions", "/exit"], COUNT_UK)
     out.encode("ascii")
 
 
 def test_no_file_path_is_echoed_into_the_session_output(data_file):
     # The banner names the file; nothing else should leak a full path.
-    _, out = cli(data_file, ["q", "/exit"], COUNT_UK)
+    _, out = cli(data_file, ["how many UK transactions", "/exit"], COUNT_UK)
     assert str(data_file.parent) not in out.split("Ready")[1]

@@ -117,7 +117,7 @@ def test_extreme_answer_names_the_group_and_value(dataset):
 
 
 def test_tied_extremes_are_all_reported(dataset):
-    out = respond(dataset, "which region has most transactions", plan(
+    out = respond(dataset, "which region has most transactions, excluding UK", plan(
         "Region with the most transactions",
         {"tool": "filter_rows", "column": "region", "op": "neq", "value": "UK"},
         {"tool": "group_by", "by": "region", "func": "count"},
@@ -161,7 +161,7 @@ def test_explanation_names_the_active_dataset(dataset):
     ],
 )
 def test_filter_phrasing(dataset, step, phrase):
-    out = respond(dataset, "q", plan("Count of matching transactions", step,
+    out = respond(dataset, f"question about {step.get('value')}", plan("Count of matching transactions", step,
                                      {"tool": "aggregate", "column": "id", "func": "count"}))
     assert phrase in out
 
@@ -242,7 +242,7 @@ def test_output_is_ascii_and_has_no_chain_of_thought(dataset):
 
 
 def test_singular_wording_for_one_row(dataset):
-    out = respond(dataset, "q", plan(
+    out = respond(dataset, "how many DE transactions", plan(
         "Number of transactions in region DE",
         {"tool": "filter_rows", "column": "region", "op": "eq", "value": "DE"},
         {"tool": "aggregate", "column": "id", "func": "count"},
@@ -252,7 +252,7 @@ def test_singular_wording_for_one_row(dataset):
 
 
 def test_plural_wording_for_several_rows(dataset):
-    out = respond(dataset, "q", plan(
+    out = respond(dataset, "how many UK transactions", plan(
         "Number of transactions in region UK",
         {"tool": "filter_rows", "column": "region", "op": "eq", "value": "UK"},
         {"tool": "aggregate", "column": "id", "func": "count"},

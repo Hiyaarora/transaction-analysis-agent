@@ -193,6 +193,7 @@ and correctly refuses values that no longer exist.
 | Fabricated column or metric (`profit`, `GST`) | Rejected, naming what is supported |
 | Unsupported aggregation | Rejected — never silently substituted |
 | Unknown category value (`Britain`) | Rejected with the real values; synonyms are never mapped |
+| A valid value the question never named (`Germany` planned as `DE`) | Clarification: a category value must appear in the question, so a synonym resolved by the model is caught even though `DE` is real |
 | Near-miss value (`Gama`) | "Did you mean 'Gamma'?" |
 | Ambiguous wording ("in Mars", "discount over 10") | Clarification requested, not guessed |
 | Code execution / file access / secrets | Rejected before the model is called |
@@ -206,7 +207,7 @@ there being no expressible operation outside those six tools.
 ## Testing
 
 ```bash
-python -m pytest                   # 433 passed, 2 skipped (warnings are errors)
+python -m pytest                   # 443 passed, 2 skipped (warnings are errors)
 RUN_LIVE_LLM=1 python -m pytest    # also runs the two tests that call Gemini
 
 cd frontend
@@ -244,7 +245,7 @@ app/
   llm/             provider interface, Gemini and Groq clients, cross-provider fallback, factory, test double
   api/             the HTTP adapter: five endpoints, a wire schema, sessions
 data/project_4.csv
-tests/             433 tests
+tests/             443 tests
 frontend/src/
   api/client.ts    the only module that speaks HTTP
   types/api.ts     the wire contract, mirroring app/api/schemas.py
