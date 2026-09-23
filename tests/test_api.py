@@ -363,3 +363,23 @@ def test_a_path_in_the_uploaded_filename_is_stripped(client):
                 files={"file": ("../../etc/evil.csv", csv_bytes("T1,2026-01-01,UK,Alpha,1,100,0.00,"), "text/csv")})
     name = client.get("/api/dataset", headers=headers()).json()["source_name"]
     assert name == "evil.csv"
+
+
+def test_health_reports_on_the_configured_provider_not_a_fixed_one(client, monkeypatch):
+    # With Groq selected, a missing Gemini key must not read as "unconfigured",
+    # and a missing Groq key must not be hidden by a present Gemini one.
+    from app.api import deps
+    from app.config import Settings
+
+    def configured(provider, gemini_key, groq_key):
+        return lambda *a, **k: Settings(
+            llm_provider=provider, gemini_api_key=gemini_key, gemini_api_key_2=None,
+            gemini_model="m", gemini_fallback_model=None, gemini_thinking_level="MINIMAL",
+            groq_api_key=groq_key, groq_model="m",
+        )
+
+    monkeypatch.setattr(deps, "load_settings", configured("groq", None, "q"))
+    assert client.get("/api/health").json()["llm_configured"] is True
+
+    monkeypatch.setattr(deps, "load_settings", configured("groq", "g", None))
+    assert client.get("/api/health").json()["llm_configured"] is False

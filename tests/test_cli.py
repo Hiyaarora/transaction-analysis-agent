@@ -84,6 +84,9 @@ def test_invalid_dataset_exits_with_code_one(write_csv):
 
 
 def test_missing_api_key_is_reported_clearly(data_file, monkeypatch):
+    # load_dotenv copies .env into os.environ, so the provider and every key
+    # have to be pinned here rather than merely deleted.
+    monkeypatch.setenv("LLM_PROVIDER", "gemini")
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     out = io.StringIO()
     # No llm injected: the CLI must build one from settings and fail clearly.

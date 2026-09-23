@@ -18,7 +18,7 @@ from app.agent import Agent
 from app.config import load_settings
 from app.data_loader import ActiveDataset, DatasetLoadError, load_dataset
 from app.llm.base import LLMClient, LLMError
-from app.llm.gemini import GeminiClient
+from app.llm.factory import build_llm
 from app.renderer import render
 
 PROMPT = "> "
@@ -166,13 +166,7 @@ def _parse(argv: list[str]) -> argparse.Namespace:
 
 def _build_llm(use_dotenv: bool) -> LLMClient:
     settings = load_settings(dotenv_path=".env" if use_dotenv else None)
-    return GeminiClient(
-        settings.gemini_api_key,
-        settings.gemini_model,
-        settings.gemini_fallback_model,
-        backup_api_key=settings.gemini_api_key_2,
-        thinking_level=settings.gemini_thinking_level,
-    )
+    return build_llm(settings)
 
 
 def main() -> int:  # pragma: no cover - thin wrapper around run()

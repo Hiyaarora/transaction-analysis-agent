@@ -206,7 +206,7 @@ there being no expressible operation outside those six tools.
 ## Testing
 
 ```bash
-python -m pytest                   # 404 passed, 2 skipped (warnings are errors)
+python -m pytest                   # 422 passed, 2 skipped (warnings are errors)
 RUN_LIVE_LLM=1 python -m pytest    # also runs the two tests that call Gemini
 
 cd frontend
@@ -241,10 +241,10 @@ app/
   agent.py         the pipeline, wired
   renderer.py      answer / operations performed / explanation
   cli.py           the interactive session
-  llm/             provider interface, Gemini implementation, test double
+  llm/             provider interface, Gemini and Groq implementations, factory, test double
   api/             the HTTP adapter: five endpoints, a wire schema, sessions
 data/project_4.csv
-tests/             404 tests
+tests/             422 tests
 frontend/src/
   api/client.ts    the only module that speaks HTTP
   types/api.ts     the wire contract, mirroring app/api/schemas.py
@@ -283,7 +283,9 @@ leaves the previous dataset active.
 | `GEMINI_MODEL` | `gemini-3.6-flash` | planning model |
 | `GEMINI_FALLBACK_MODEL` | none | optional second model, tried on a 429 or 503 |
 | `GEMINI_THINKING_LEVEL` | `MINIMAL` | how hard the model may reason before answering |
-| `LLM_PROVIDER` | `gemini` | the provider sits behind an `LLMClient` interface |
+| `LLM_PROVIDER` | `groq` | `groq` or `gemini`; both sit behind one `LLMClient` interface |
+| `GROQ_API_KEY` | - | required when the provider is `groq` |
+| `GROQ_MODEL` | `openai/gpt-oss-120b` | Groq planning model |
 
 ## Limitations
 
@@ -292,11 +294,21 @@ leaves the previous dataset active.
   rather than an answer. Setting `GEMINI_API_KEY_2` doubles the ceiling (the
   client rotates to it on a 429) but does not remove it; enabling billing on a
   key does. A question costs roughly 1,450 tokens.
-* **Latency.** A question takes as long as the planning call, which on the
-  free tier has been measured anywhere between 10 and 50 seconds for the same
-  request. Validation and execution together take under 10 ms, so essentially
-  all of it is the provider. The web UI caches answers per dataset, so a
-  question is only ever paid for once.
+* **Latency is the provider's, not the pipeline's.** Validation and execution
+  together take under 10 ms; everything else is the planning call. Measured on
+  the ten questions this dataset carries, with every answer checked against a
+  value computed independently in pandas:
+
+  | provider | median | mean | correct |
+  |---|---:|---:|---:|
+  | `groq` / `openai/gpt-oss-120b` | 1.2 s | 7.9 s | 10/10 |
+  | `gemini` / `gemini-3.6-flash` | 30.2 s | 35.1 s | 10/10 |
+
+  Both plan correctly; Groq is roughly twenty-five times quicker, which is why
+  it is the default. Groq's free tier caps tokens per minute, so a burst of
+  questions is throttled to around 18 s each - still faster than the
+  alternative. The web UI caches answers per dataset, so a question is only
+  ever paid for once.
 * Plan quality depends on the model. The architecture guarantees that a bad
   plan is *rejected*, not that every question produces one.
 * Answers are single values, grouped values or an extreme — the agent does not

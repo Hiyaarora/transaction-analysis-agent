@@ -21,6 +21,8 @@ class Settings:
     gemini_fallback_model: str | None
     #: MINIMAL, LOW, MEDIUM or HIGH. Some models accept only a subset.
     gemini_thinking_level: str
+    groq_api_key: str | None
+    groq_model: str
 
 
 def load_settings(dotenv_path: str | Path | None = ".env") -> Settings:
@@ -35,6 +37,8 @@ def load_settings(dotenv_path: str | Path | None = ".env") -> Settings:
         # Empty string opts out of the fallback; unset keeps the default.
         gemini_fallback_model=_fallback(os.getenv("GEMINI_FALLBACK_MODEL")),
         gemini_thinking_level=os.getenv("GEMINI_THINKING_LEVEL") or "MINIMAL",
+        groq_api_key=os.getenv("GROQ_API_KEY") or None,
+        groq_model=os.getenv("GROQ_MODEL") or DEFAULT_GROQ_MODEL,
     )
 
 
@@ -44,6 +48,10 @@ def load_settings(dotenv_path: str | Path | None = ".env") -> Settings:
 #: model measured to accept our request config besides the primary, so it is
 #: the emergency path rather than a preference: it is markedly slower.
 DEFAULT_FALLBACK_MODEL = "gemini-3.5-flash-lite"
+
+#: Groq's larger open model: better at multi-step planning than the 20B,
+#: and one of the models that supports JSON-schema responses.
+DEFAULT_GROQ_MODEL = "openai/gpt-oss-120b"
 
 
 def _fallback(raw: str | None) -> str | None:
