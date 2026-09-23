@@ -19,6 +19,8 @@ class Settings:
     gemini_api_key_2: str | None
     gemini_model: str
     gemini_fallback_model: str | None
+    #: MINIMAL, LOW, MEDIUM or HIGH. Some models accept only a subset.
+    gemini_thinking_level: str
 
 
 def load_settings(dotenv_path: str | Path | None = ".env") -> Settings:
@@ -32,6 +34,7 @@ def load_settings(dotenv_path: str | Path | None = ".env") -> Settings:
         gemini_model=os.getenv("GEMINI_MODEL") or "gemini-3.6-flash",
         # Empty string opts out of the fallback; unset keeps the default.
         gemini_fallback_model=_fallback(os.getenv("GEMINI_FALLBACK_MODEL")),
+        gemini_thinking_level=os.getenv("GEMINI_THINKING_LEVEL") or "MINIMAL",
     )
 
 

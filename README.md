@@ -206,7 +206,7 @@ there being no expressible operation outside those six tools.
 ## Testing
 
 ```bash
-python -m pytest                   # 391 passed, 2 skipped (warnings are errors)
+python -m pytest                   # 393 passed, 2 skipped (warnings are errors)
 RUN_LIVE_LLM=1 python -m pytest    # also runs the two tests that call Gemini
 
 cd frontend
@@ -244,7 +244,7 @@ app/
   llm/             provider interface, Gemini implementation, test double
   api/             the HTTP adapter: five endpoints, a wire schema, sessions
 data/project_4.csv
-tests/             391 tests
+tests/             393 tests
 frontend/src/
   api/client.ts    the only module that speaks HTTP
   types/api.ts     the wire contract, mirroring app/api/schemas.py
@@ -282,6 +282,7 @@ leaves the previous dataset active.
 | `GEMINI_API_KEY_2` | – | optional second key, tried automatically when the first is rate limited |
 | `GEMINI_MODEL` | `gemini-3.6-flash` | planning model |
 | `GEMINI_FALLBACK_MODEL` | none | optional second model, tried on a 429 or 503 |
+| `GEMINI_THINKING_LEVEL` | `MINIMAL` | how hard the model may reason before answering |
 | `LLM_PROVIDER` | `gemini` | the provider sits behind an `LLMClient` interface |
 
 ## Limitations
@@ -291,6 +292,11 @@ leaves the previous dataset active.
   rather than an answer. Setting `GEMINI_API_KEY_2` doubles the ceiling (the
   client rotates to it on a 429) but does not remove it; enabling billing on a
   key does. A question costs roughly 1,450 tokens.
+* **Latency.** A question takes as long as the planning call, which on the
+  free tier has been measured anywhere between 10 and 50 seconds for the same
+  request. Validation and execution together take under 10 ms, so essentially
+  all of it is the provider. The web UI caches answers per dataset, so a
+  question is only ever paid for once.
 * Plan quality depends on the model. The architecture guarantees that a bad
   plan is *rejected*, not that every question produces one.
 * Answers are single values, grouped values or an extreme — the agent does not

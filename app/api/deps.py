@@ -22,6 +22,7 @@ def get_llm() -> LLMClient:
         settings.gemini_model,
         settings.gemini_fallback_model,
         backup_api_key=settings.gemini_api_key_2,
+        thinking_level=settings.gemini_thinking_level,
     )
 
 

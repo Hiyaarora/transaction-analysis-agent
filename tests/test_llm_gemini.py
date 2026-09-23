@@ -78,7 +78,7 @@ def test_sends_system_user_and_schema_and_returns_text():
     assert cfg.response_mime_type == "application/json"
     assert cfg.response_json_schema == SCHEMA
     assert cfg.temperature == 0
-    assert cfg.thinking_config.thinking_budget == 0
+    assert cfg.thinking_config.thinking_level == "MINIMAL"
 
 
 def test_missing_api_key_is_an_llm_error():
@@ -258,3 +258,26 @@ def test_no_vendor_exception_type_reaches_the_caller():
         client, _ = make([failure])
         with pytest.raises(LLMError):
             client.complete_json(system="s", user="u", schema=SCHEMA)
+
+
+# --- thinking configuration --------------------------------------------------------
+
+
+def test_request_uses_thinking_level_not_the_2x_budget_parameter():
+    # `thinking_budget` is the Gemini 2.x parameter. On 3.x models it is either
+    # rejected (400 on some flash-lite models) or silently ignored, in which
+    # case the model reasons at length and a plan takes ~50s instead of ~10s.
+    client, models = make(["{}"])
+    client.complete_json(system="s", user="u", schema=SCHEMA)
+    thinking = models.calls[0]["config"].thinking_config
+    assert thinking.thinking_level == "MINIMAL"
+    assert thinking.thinking_budget is None
+
+
+def test_thinking_level_is_configurable():
+    sdk = _StubSDK(["{}"])
+    client = GeminiClient(
+        api_key="k", model="m", thinking_level="LOW", sdk_factory=lambda key: sdk
+    )
+    client.complete_json(system="s", user="u", schema=SCHEMA)
+    assert sdk.models.calls[0]["config"].thinking_config.thinking_level == "LOW"

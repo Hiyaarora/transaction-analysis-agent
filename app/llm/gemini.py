@@ -33,6 +33,14 @@ from google.genai import types
 
 from app.llm.base import LLMClient, LLMError
 
+# How hard the model may reason before answering. Building a plan is a
+# translation task, not a reasoning one, so the cheapest setting is right.
+#
+# This must be `thinking_level`, not the Gemini 2.x `thinking_budget`: 3.x
+# models either reject that parameter outright or ignore it and reason at
+# full depth, which measured 30-55s per plan against 10-12s here.
+DEFAULT_THINKING_LEVEL = "MINIMAL"
+
 # HTTP statuses worth trying the next key or model for.
 _RETRYABLE_CODES = (429, 503)
 
@@ -46,6 +54,7 @@ class GeminiClient(LLMClient):
         model: str,
         fallback_model: str | None = None,
         backup_api_key: str | None = None,
+        thinking_level: str = DEFAULT_THINKING_LEVEL,
         sdk_factory: Callable[[str], Any] | None = None,
     ) -> None:
         if not api_key:
@@ -53,6 +62,7 @@ class GeminiClient(LLMClient):
         self.model = model
         self.fallback_model = fallback_model if fallback_model and fallback_model != model else None
         self.backup_configured = bool(backup_api_key and backup_api_key != api_key)
+        self.thinking_level = thinking_level
 
         build = sdk_factory or (lambda key: genai.Client(api_key=key))
         keys = [api_key] + ([backup_api_key] if self.backup_configured else [])
@@ -65,8 +75,8 @@ class GeminiClient(LLMClient):
             response_mime_type="application/json",
             response_json_schema=_gemini_schema(schema),
             temperature=0,  # planning should be repeatable
-            # Flash reasons before answering and bills it as output; a plan needs none of that.
-            thinking_config=types.ThinkingConfig(thinking_budget=0),
+            # Not `thinking_budget`: see DEFAULT_THINKING_LEVEL.
+            thinking_config=types.ThinkingConfig(thinking_level=self.thinking_level),
             # We pass no tools; without this the SDK logs an AFC warning on every call.
             automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
         )
