@@ -36,12 +36,17 @@ services:
         sync: false
 
       # Asked only when Groq cannot answer at all - out of quota for the day,
-      # or unreachable. Naming it here costs nothing while GEMINI_API_KEY is
-      # unset: app/llm/factory.py skips a fallback it cannot build, so the
-      # service runs on Groq alone until the key is added in the dashboard,
-      # and picks the fallback up on the next restart without a code change.
+      # or unreachable. Each provider already retries within itself; this is
+      # the escape from the provider as a whole being unavailable.
       - key: LLM_FALLBACK_PROVIDER
         value: gemini
+
+      # The second secret, on the same terms as the first: prompted for, never
+      # committed. A fallback that cannot be built is skipped rather than
+      # fatal, so leaving this empty degrades to Groq alone instead of taking
+      # the service down - but then there is no fallback.
+      - key: GEMINI_API_KEY
+        sync: false
 
       # Python writes .pyc files the container will never reuse.
       - key: PYTHONDONTWRITEBYTECODE
