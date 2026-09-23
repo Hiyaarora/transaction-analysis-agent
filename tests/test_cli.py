@@ -9,7 +9,7 @@ import json
 
 import pytest
 
-from app.cli import run
+from app.cli import Thinking, run
 from app.llm.base import LLMError
 from app.llm.fake import FakeLLMClient
 
@@ -275,3 +275,70 @@ def test_the_help_and_banner_say_the_command_exists(data_file):
     _, out = cli(data_file, ["/help", "/exit"])
     assert "/ask" in out          # in the command list
     assert "/ask" in out.split("Ready")[0]  # and in the startup banner
+
+
+# --- the wait ------------------------------------------------------------------------
+#
+# Planning is a network call: about a second on Groq, half a minute on Gemini.
+# A silent terminal during that is indistinguishable from a hang. The spinner
+# exists for a person watching, so it runs only when one is - a redirected or
+# captured stream gets exactly the bytes it got before.
+
+
+class _Terminal(io.StringIO):
+    """A stream that claims to be a terminal, which StringIO otherwise denies."""
+
+    def isatty(self) -> bool:
+        return True
+
+
+def test_nothing_is_drawn_when_no_terminal_is_watching():
+    stream = io.StringIO()
+    with Thinking(stream):
+        pass
+    assert stream.getvalue() == ""
+
+
+def test_a_frame_is_drawn_for_a_terminal(monkeypatch):
+    stream = _Terminal()
+    spinner = Thinking(stream)
+    spinner.tick(0)
+    assert "Thinking" in stream.getvalue()
+    assert stream.getvalue().startswith("\r")
+
+
+def test_the_frames_change_so_the_wait_looks_alive():
+    stream = _Terminal()
+    spinner = Thinking(stream)
+    spinner.tick(0)
+    spinner.tick(1)
+    first, second = stream.getvalue().split("\r")[1:3]
+    assert first != second
+
+
+def test_a_long_wait_reports_how_long():
+    stream = _Terminal()
+    spinner = Thinking(stream, clock=iter([0.0, 9.0]).__next__)
+    spinner.tick(0)
+    assert "9s" in stream.getvalue()
+
+
+def test_the_line_is_erased_so_the_answer_starts_clean():
+    stream = _Terminal()
+    with Thinking(stream, interval=0.001) as spinner:
+        spinner.tick(0)
+    # Whatever was drawn, the cursor is back at the start of a blank line.
+    assert stream.getvalue().split("\r")[-1] == ""
+
+
+def test_the_spinner_is_ascii():
+    stream = _Terminal()
+    spinner = Thinking(stream)
+    for step in range(len(Thinking.FRAMES) + 1):
+        spinner.tick(step)
+    stream.getvalue().encode("ascii")
+
+
+def test_a_captured_session_carries_no_spinner_characters(data_file):
+    _, out = cli(data_file, ["how many UK transactions", "/ask 1", "/exit"], COUNT_UK, COUNT_UK)
+    assert "\r" not in out

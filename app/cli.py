@@ -11,6 +11,9 @@ in tests without a terminal or a network.
 """
 
 import argparse
+import threading
+import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import TextIO
 
@@ -22,6 +25,88 @@ from app.llm.factory import build_llm
 from app.renderer import render
 
 PROMPT = "> "
+
+
+class Thinking:
+    """A spinner for the wait, drawn only when a person is watching it.
+
+    Planning is a network call - about a second on Groq, half a minute on
+    Gemini - and a silent terminal for that long is indistinguishable from a
+    hang. The frame changes so the wait looks alive, and the elapsed seconds
+    say how long it has actually been.
+
+    Two things make this safe to add to a program whose output is also a test
+    fixture. It writes nothing at all unless the stream is a terminal, so a
+    redirected or captured session gets exactly the bytes it got before. And
+    it draws on one line with a carriage return, erasing itself on the way
+    out, so the answer that follows starts on a clean line.
+
+    The drawing runs on a daemon thread: the work it is reporting on is a
+    blocking call, so nothing else would get a chance to draw. `tick` is
+    separate from that thread and takes the step number, which is what lets a
+    test assert what gets drawn without timing anything.
+    """
+
+    FRAMES = "|/-\\"
+    LABEL = "Thinking"
+
+    def __init__(
+        self,
+        stream: TextIO,
+        interval: float = 0.12,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self.stream = stream
+        self.interval = interval
+        self._clock = clock
+        # A stream that cannot say either way is assumed not to be a terminal.
+        self.enabled = bool(getattr(stream, "isatty", lambda: False)())
+        self._started = self._clock()
+        self._width = 0
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def __enter__(self) -> "Thinking":
+        self._started = self._clock()
+        if self.enabled:
+            self._thread = threading.Thread(target=self._spin, daemon=True)
+            self._thread.start()
+        return self
+
+    def __exit__(self, *exception: object) -> bool:
+        if self._thread is not None:
+            self._stop.set()
+            self._thread.join(timeout=1.0)
+            self._erase()
+        return False  # never swallow whatever went wrong inside the wait
+
+    def tick(self, step: int) -> None:
+        """Draw one frame. Does nothing when nobody is watching."""
+        if not self.enabled:
+            return
+        elapsed = int(self._clock() - self._started)
+        seconds = f" {elapsed}s" if elapsed else ""
+        line = f"{self.LABEL} {self.FRAMES[step % len(self.FRAMES)]}{seconds}"
+        self._width = max(self._width, len(line))
+        self._write(f"\r{line}")
+
+    def _spin(self) -> None:
+        step = 0
+        while not self._stop.is_set():
+            self.tick(step)
+            step += 1
+            if self._stop.wait(self.interval):
+                return
+
+    def _erase(self) -> None:
+        self._write("\r" + " " * self._width + "\r")
+
+    def _write(self, text: str) -> None:
+        try:
+            self.stream.write(text)
+            self.stream.flush()
+        except ValueError:  # the stream was closed while we were drawing
+            self.enabled = False
 
 _HELP = """Commands:
   /help              show this message
@@ -51,6 +136,12 @@ def run(argv: list[str], stdin: TextIO, stdout: TextIO, llm: LLMClient | None = 
         say(f"Could not start the planner: {exc}")
         return 1
 
+    def answer(question: str) -> str:
+        """Ask, showing the wait, and render what comes back."""
+        with Thinking(stdout):
+            response = agent.ask(question)
+        return render(response, agent.dataset.profile)
+
     agent = Agent(dataset, client)
     say(_banner(dataset))
     say("Ready. Ask a question, or /help for commands.")
@@ -61,7 +152,7 @@ def run(argv: list[str], stdin: TextIO, stdout: TextIO, llm: LLMClient | None = 
         if not question:
             continue
         if question.startswith("/"):
-            keep_going = _command(question, agent, say)
+            keep_going = _command(question, agent, say, answer)
             say()
             if not keep_going:
                 return 0
@@ -70,10 +161,10 @@ def run(argv: list[str], stdin: TextIO, stdout: TextIO, llm: LLMClient | None = 
         # reinterpreted: "3" is not a question anybody could mean literally,
         # and sending it to the planner would spend a call to be told so.
         if _is_a_number(question):
-            _ask_numbered(question, agent, say)
+            _ask_numbered(question, agent, say, answer)
             say()
             continue
-        say(render(agent.ask(question), agent.dataset.profile))
+        say(answer(question))
         say()
     return 0
 
@@ -81,7 +172,7 @@ def run(argv: list[str], stdin: TextIO, stdout: TextIO, llm: LLMClient | None = 
 # --- commands -----------------------------------------------------------------------
 
 
-def _command(line: str, agent: Agent, say) -> bool:
+def _command(line: str, agent: Agent, say, answer) -> bool:
     """Handle a /command. Returns False when the session should end."""
     name, _, argument = line.partition(" ")
     name, argument = name.lower(), argument.strip()
@@ -102,7 +193,7 @@ def _command(line: str, agent: Agent, say) -> bool:
         else:
             say("The dataset file contains no embedded questions.")
     elif name == "/ask":
-        _ask_numbered(argument, agent, say)
+        _ask_numbered(argument, agent, say, answer)
     elif name == "/load":
         if not argument:
             say("Usage: /load <path to a .csv file>")
@@ -113,7 +204,7 @@ def _command(line: str, agent: Agent, say) -> bool:
     return True
 
 
-def _ask_numbered(argument: str, agent: Agent, say) -> None:
+def _ask_numbered(argument: str, agent: Agent, say, answer) -> None:
     """Ask the question the active file carries at position `argument`.
 
     The number is only a way of naming a question. Once resolved, the text
@@ -144,7 +235,7 @@ def _ask_numbered(argument: str, agent: Agent, say) -> None:
 
     question = questions[number - 1]
     say(f"Q{number}: {question}")  # the transcript should say what was asked
-    say(render(agent.ask(question), agent.dataset.profile))
+    say(answer(question))
 
 
 def _is_a_number(text: str) -> bool:

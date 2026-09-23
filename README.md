@@ -99,6 +99,11 @@ Commands: `/help`, `/profile`, `/questions`, `/ask <n>`, `/load <path>`,
 `/exit`. The dataset is loaded once and every question runs against it until
 you `/load` another.
 
+While a question is being planned the terminal shows `Thinking / 4s`, drawn
+on one line and erased before the answer. It appears only when a terminal is
+watching: a redirected or captured session gets the same bytes it always did,
+which is what keeps the output usable as a test fixture.
+
 `/ask <n>` - or a bare number - runs the n-th question the *loaded file*
 carries, so the numbering follows whatever CSV is active and nothing about
 those questions exists in the code. The text is then asked through the same
@@ -216,7 +221,7 @@ there being no expressible operation outside those six tools.
 ## Testing
 
 ```bash
-python -m pytest                   # 468 passed, 2 skipped (warnings are errors)
+python -m pytest                   # 475 passed, 2 skipped (warnings are errors)
 RUN_LIVE_LLM=1 python -m pytest    # also runs the two tests that call Gemini
 
 cd frontend
@@ -255,7 +260,7 @@ app/
   api/             the HTTP adapter: six endpoints, a wire schema, sessions,
                    and the built UI served from the same origin
 data/project_4.csv
-tests/             468 tests
+tests/             475 tests
 frontend/src/
   api/client.ts    the only module that speaks HTTP
   types/api.ts     the wire contract, mirroring app/api/schemas.py
