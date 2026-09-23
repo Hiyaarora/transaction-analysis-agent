@@ -207,11 +207,11 @@ there being no expressible operation outside those six tools.
 ## Testing
 
 ```bash
-python -m pytest                   # 443 passed, 2 skipped (warnings are errors)
+python -m pytest                   # 449 passed, 2 skipped (warnings are errors)
 RUN_LIVE_LLM=1 python -m pytest    # also runs the two tests that call Gemini
 
 cd frontend
-npx vitest run                     # 49 passed
+npx vitest run                     # 53 passed
 npx tsc --noEmit                   # no type errors
 ```
 
@@ -245,7 +245,7 @@ app/
   llm/             provider interface, Gemini and Groq clients, cross-provider fallback, factory, test double
   api/             the HTTP adapter: five endpoints, a wire schema, sessions
 data/project_4.csv
-tests/             443 tests
+tests/             449 tests
 frontend/src/
   api/client.ts    the only module that speaks HTTP
   types/api.ts     the wire contract, mirroring app/api/schemas.py
@@ -263,6 +263,7 @@ run_api.py         the web API
 | `POST` | `/api/dataset/assessment` | load the bundled dataset |
 | `POST` | `/api/dataset/upload` | load an uploaded CSV |
 | `GET` | `/api/dataset` | the active dataset for this session |
+| `GET` | `/api/dataset/download` | the CSV itself, to open in a spreadsheet |
 | `POST` | `/api/ask` | ask a question |
 
 Each handler looks up a session, calls an existing function and converts the
@@ -273,7 +274,9 @@ tab, held in memory, identified by a UUID the client sends in `X-Session-Id`.
 An uploaded file never becomes a path the agent can reach: the browser sends
 bytes, the server names its own temporary file and deletes it as soon as the
 loader has read it - after a failure as well as a success. A failed upload
-leaves the previous dataset active.
+leaves the previous dataset active. The bytes stay in the session, in memory,
+so the file can be downloaded back unchanged; nothing re-reads them for
+analysis, and replacing the dataset replaces them.
 
 ## Configuration
 

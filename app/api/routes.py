@@ -5,6 +5,7 @@ and converts the result. No analysis happens here.
     POST /api/dataset/assessment    load the bundled dataset
     POST /api/dataset/upload        load an uploaded CSV
     GET  /api/dataset               the active dataset for this session
+    GET  /api/dataset/download      the CSV itself, to open elsewhere
     POST /api/ask                   ask a question
 
 Handlers are `def`, not `async def`, so FastAPI runs them in its threadpool:
@@ -17,7 +18,7 @@ import tempfile
 from dataclasses import replace
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Header, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Header, HTTPException, Response, UploadFile
 
 from app.agent import Agent
 from app.api import convert, schemas
@@ -50,6 +51,11 @@ def _active(session: Session | None) -> Agent:
     return session.agent
 
 
+def _loaded(session: Session | None) -> Session:
+    _active(session)  # same error when nothing is loaded
+    return session
+
+
 # --- health -------------------------------------------------------------------------
 
 
@@ -69,6 +75,21 @@ def current_dataset(
     return convert.dataset_state(_active(store.get(session_id)).dataset)
 
 
+@router.get("/dataset/download")
+def download_dataset(
+    session_id: str = Depends(_session_id),
+    store: SessionStore = Depends(get_store),
+) -> Response:
+    session = _loaded(store.get(session_id))
+    # The name is already stripped of any path (see _safe_name), and is quoted
+    # so it cannot break out of the header.
+    return Response(
+        content=session.source_bytes or b"",
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{session.source_name}"'},
+    )
+
+
 @router.post("/dataset/assessment", response_model=schemas.DatasetState)
 def load_assessment_dataset(
     session_id: str = Depends(_session_id),
@@ -79,7 +100,8 @@ def load_assessment_dataset(
         dataset = load_dataset(ASSESSMENT_DATASET)
     except DatasetLoadError as exc:
         raise _fail(500, "assessment_unavailable", f"The bundled dataset could not be loaded: {exc}") from exc
-    return _activate(store.get_or_create(session_id), dataset, llm)
+    return _activate(store.get_or_create(session_id), dataset, llm,
+                     source=ASSESSMENT_DATASET.read_bytes())
 
 
 @router.post("/dataset/upload", response_model=schemas.DatasetState)
@@ -105,7 +127,7 @@ def upload_dataset(
 
     # Only replace the active dataset once loading has succeeded; a failed
     # upload leaves the session exactly as it was.
-    return _activate(session, _renamed(dataset, _safe_name(file.filename)), llm)
+    return _activate(session, _renamed(dataset, _safe_name(file.filename)), llm, source=content)
 
 
 # --- questions ----------------------------------------------------------------------
@@ -129,11 +151,17 @@ def ask(
 # --- helpers ------------------------------------------------------------------------
 
 
-def _activate(session: Session, dataset: ActiveDataset, llm: LLMClient) -> schemas.DatasetState:
+def _activate(
+    session: Session, dataset: ActiveDataset, llm: LLMClient, source: bytes
+) -> schemas.DatasetState:
     if session.agent is None:
         session.agent = Agent(dataset, llm)
     else:
         session.agent.load(dataset)  # the same call the CLI's /load makes
+    # Replacing the dataset replaces the file behind it, so a download always
+    # matches the dataset the answers came from.
+    session.source_bytes = source
+    session.source_name = dataset.source_name
     return convert.dataset_state(dataset)
 
 

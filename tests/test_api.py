@@ -384,3 +384,71 @@ def test_health_reports_on_the_configured_provider_not_a_fixed_one(client, monke
 
     monkeypatch.setattr(deps, "load_settings", configured("groq", "g", None))
     assert client.get("/api/health").json()["llm_configured"] is False
+
+
+# --- download --------------------------------------------------------------------
+#
+# The file itself, so it can be opened in whatever the person normally uses.
+# An uploaded file's bytes are kept in the session, in memory only: nothing is
+# written to disk, and nothing re-reads them for analysis.
+
+
+def test_downloading_the_assessment_dataset_returns_the_bundled_file(client):
+    from pathlib import Path
+
+    client.post("/api/dataset/assessment", headers=headers())
+    response = client.get("/api/dataset/download", headers=headers())
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/csv")
+    assert "project_4.csv" in response.headers["content-disposition"]
+    assert response.content == Path("data/project_4.csv").read_bytes()
+
+
+def test_downloading_an_uploaded_dataset_returns_exactly_what_was_sent(client):
+    original = csv_bytes(
+        "T1,2026-01-03,UK,Alpha,10,100,0.10,",
+        'Q1,,,,,,,"A question the file carries"',
+    )
+    client.post("/api/dataset/upload", headers=headers(),
+                files={"file": ("mine.csv", original, "text/csv")})
+
+    response = client.get("/api/dataset/download", headers=headers())
+    assert response.status_code == 200
+    # Byte for byte: the question rows the loader set aside are still in it.
+    assert response.content == original
+    assert "mine.csv" in response.headers["content-disposition"]
+
+
+def test_downloading_follows_the_active_dataset(client):
+    client.post("/api/dataset/assessment", headers=headers())
+    client.post("/api/dataset/upload", headers=headers(),
+                files={"file": ("second.csv", csv_bytes("T9,2027-05-05,IN,Delta,1,100,0.00,"), "text/csv")})
+
+    response = client.get("/api/dataset/download", headers=headers())
+    assert "second.csv" in response.headers["content-disposition"]
+    assert b"Delta" in response.content
+
+
+def test_a_failed_upload_leaves_the_previous_file_downloadable(client):
+    client.post("/api/dataset/assessment", headers=headers())
+    broken = csv_bytes("T1,2026-01-03,UK,1,100,0.1", header="id,date,region,units,unit_price,discount")
+    client.post("/api/dataset/upload", headers=headers(), files={"file": ("broken.csv", broken, "text/csv")})
+
+    response = client.get("/api/dataset/download", headers=headers())
+    assert "project_4.csv" in response.headers["content-disposition"]
+    assert b"broken" not in response.content
+
+
+def test_downloading_without_a_dataset_is_a_clean_error(client):
+    response = client.get("/api/dataset/download", headers=headers())
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "no_dataset"
+
+
+def test_a_filename_cannot_smuggle_a_path_into_the_download_header(client):
+    client.post("/api/dataset/upload", headers=headers(),
+                files={"file": ("../../etc/evil.csv", csv_bytes("T1,2026-01-03,UK,Alpha,1,100,0.00,"), "text/csv")})
+    disposition = client.get("/api/dataset/download", headers=headers()).headers["content-disposition"]
+    assert "evil.csv" in disposition
+    assert ".." not in disposition and "/" not in disposition

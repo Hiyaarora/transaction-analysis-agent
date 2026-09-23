@@ -154,3 +154,74 @@ describe("uploading a dataset", () => {
     expect((await questionPanel()).getByText("Invented question one?")).toBeInTheDocument();
   });
 });
+
+describe("the file in use", () => {
+  it("names the loaded file on the dataset tile", async () => {
+    fetchMock.mockResolvedValue(jsonResponse(datasetFixture({ source_name: "my-upload.csv" })));
+    render(<App />);
+    await userEvent.upload(
+      screen.getByLabelText(/upload a csv file/i),
+      new File(["id\n"], "my-upload.csv", { type: "text/csv" }),
+    );
+
+    expect(await screen.findByText("my-upload.csv")).toBeInTheDocument();
+    // On the existing tile, not a second one.
+    expect(screen.queryByRole("region", { name: /loaded dataset/i })).not.toBeInTheDocument();
+  });
+
+  it("offers no download until something is loaded", () => {
+    render(<App />);
+    expect(screen.queryByRole("button", { name: /download/i })).not.toBeInTheDocument();
+  });
+
+  it("downloads the csv under its own name", async () => {
+    const click = vi.fn();
+    const created: string[] = [];
+    vi.spyOn(document, "createElement").mockImplementation(((tag: string) => {
+      if (tag !== "a") return document.createElementNS("http://www.w3.org/1999/xhtml", tag);
+      const anchor = { href: "", download: "", click } as unknown as HTMLAnchorElement;
+      return anchor;
+    }) as typeof document.createElement);
+    vi.stubGlobal("URL", {
+      ...URL,
+      createObjectURL: (blob: Blob) => {
+        created.push("blob-url");
+        void blob;
+        return "blob:fake";
+      },
+      revokeObjectURL: () => {},
+    });
+
+    fetchMock.mockResolvedValueOnce(jsonResponse(datasetFixture({ source_name: "mine.csv" })));
+    render(<App />);
+    await userEvent.click(screen.getByRole("button", { name: /use assessment dataset/i }));
+    await screen.findByText("mine.csv");
+
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      blob: async () => new Blob(["id,date\n"], { type: "text/csv" }),
+    } as Response);
+    await userEvent.click(screen.getByRole("button", { name: /download mine\.csv/i }));
+
+    await waitFor(() => expect(click).toHaveBeenCalled());
+    const [url, init] = fetchMock.mock.calls.find(([u]) => u === "/api/dataset/download")!;
+    expect(url).toBe("/api/dataset/download");
+    expect(init.headers["X-Session-Id"]).toBe("session-under-test-0001");
+    expect(created).toHaveLength(1);
+    vi.restoreAllMocks();
+  });
+
+  it("reports a download that failed, without breaking the page", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(datasetFixture()));
+    render(<App />);
+    await userEvent.click(screen.getByRole("button", { name: /use assessment dataset/i }));
+    await screen.findByText("fixture.csv");
+
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 409, blob: async () => new Blob() } as Response);
+    await userEvent.click(screen.getByRole("button", { name: /download/i }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/could not be downloaded/i);
+    expect(screen.getByRole("button", { name: /download/i })).toBeInTheDocument();
+  });
+});

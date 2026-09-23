@@ -22,6 +22,11 @@ TTL_SECONDS = 2 * 60 * 60
 @dataclass
 class Session:
     agent: Agent | None = None
+    #: The CSV exactly as it arrived, so it can be handed back for download.
+    #: In memory only: nothing is written to disk, and nothing re-reads this
+    #: for analysis - the DataFrame was built when the file was loaded.
+    source_bytes: bytes | None = None
+    source_name: str = ""
     last_used: float = field(default_factory=time.time)
 
 

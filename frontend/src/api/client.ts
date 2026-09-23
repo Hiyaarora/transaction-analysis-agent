@@ -91,6 +91,26 @@ export function getDataset(sessionId: string): Promise<DatasetState> {
   return request<DatasetState>("/dataset", sessionId);
 }
 
+/** Fetch the active dataset's CSV and hand it to the browser as a download.
+ *
+ *  A plain link cannot be used: the request needs the session header, so the
+ *  bytes are fetched and then offered through a temporary object URL.
+ */
+export async function downloadDataset(sessionId: string, filename: string): Promise<void> {
+  const response = await fetch("/api/dataset/download", { headers: { "X-Session-Id": sessionId } });
+  if (!response.ok) throw new ApiError("The dataset could not be downloaded.", "download_failed", response.status);
+
+  const url = URL.createObjectURL(await response.blob());
+  try {
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    link.click();
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
 export function askQuestion(sessionId: string, question: string): Promise<AskResponse> {
   return request<AskResponse>("/ask", sessionId, {
     method: "POST",
