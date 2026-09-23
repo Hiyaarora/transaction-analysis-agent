@@ -2,9 +2,12 @@
  * Dataset selection and upload, driven through the real components.
  *
  * `fetch` is stubbed, so these assert what the UI does with an API response -
- * never what the analysis engine computes. Nothing about regions, products or
- * counts is assumed: the fixtures invent their own values, which is also how
- * we prove the UI reads them from the response.
+ * never what the analysis engine computes. The fixtures invent their own
+ * questions, which is also how we prove the UI reads them from the response.
+ *
+ * The profile is no longer displayed, so "a dataset is loaded" is observed
+ * through behaviour: the question sections appear, carrying that file's
+ * questions.
  */
 
 import { render, screen, waitFor, within } from "@testing-library/react";
@@ -21,7 +24,7 @@ function datasetFixture(overrides: Partial<DatasetState> = {}): DatasetState {
     categorical_values: { region: ["ZA", "ZB"], product: ["Widget", "Gadget", "Doohickey"] },
     numeric_ranges: { units: [1, 9], unit_price: [10, 90], discount: [0, 0.5] },
     date_range: { start: "2031-02-03", end: "2031-08-09" },
-    null_counts: { id: 0, date: 0, region: 0, product: 0, units: 0, unit_price: 0, discount: 2 },
+    null_counts: { discount: 2 },
     parse_error_counts: {},
     extra_columns: [],
     supported_metrics: ["units", "unit_price", "discount", "revenue"],
@@ -30,14 +33,13 @@ function datasetFixture(overrides: Partial<DatasetState> = {}): DatasetState {
   };
 }
 
-/** The panel showing the dataset actually in use (the card above it repeats
- *  the assessment file name, which would otherwise be ambiguous). */
-async function activePanel() {
-  return within(await screen.findByRole("region", { name: /active dataset/i }));
-}
-
 function jsonResponse(body: unknown, status = 200): Response {
   return { ok: status < 400, status, json: async () => body } as Response;
+}
+
+/** The assessment section, which only exists once a dataset is active. */
+async function questionPanel() {
+  return within(await screen.findByRole("region", { name: /assessment questions/i }));
 }
 
 let fetchMock: ReturnType<typeof vi.fn>;
@@ -58,18 +60,15 @@ describe("loading a dataset", () => {
     expect(screen.getByText(/no dataset loaded/i)).toBeInTheDocument();
   });
 
-  it("loads the assessment dataset and shows what came back", async () => {
-    fetchMock.mockResolvedValue(jsonResponse(datasetFixture({ source_name: "project_4.csv" })));
+  it("loads the assessment dataset and shows the questions it carries", async () => {
+    fetchMock.mockResolvedValue(jsonResponse(datasetFixture()));
     render(<App />);
 
     await userEvent.click(screen.getByRole("button", { name: /use assessment dataset/i }));
 
-    const active = await activePanel();
-    expect(active.getByText("project_4.csv")).toBeInTheDocument();
-    expect(active.getByText("7")).toBeInTheDocument();
-    expect(active.getByText("ZA")).toBeInTheDocument();
-    expect(active.getByText("Doohickey")).toBeInTheDocument();
-    expect(active.getByText(/2031-02-03/)).toBeInTheDocument();
+    const panel = await questionPanel();
+    expect(panel.getByText("Invented question one?")).toBeInTheDocument();
+    expect(panel.getByText(/question 1 of 2/i)).toBeInTheDocument();
     expect(screen.queryByText(/no dataset loaded/i)).not.toBeInTheDocument();
   });
 
@@ -85,29 +84,13 @@ describe("loading a dataset", () => {
     expect(init.headers["X-Session-Id"]).toBe("session-under-test-0001");
   });
 
-  it("reports missing values from the profile", async () => {
-    fetchMock.mockResolvedValue(jsonResponse(datasetFixture()));
-    render(<App />);
-    await userEvent.click(screen.getByRole("button", { name: /use assessment dataset/i }));
-
-    expect(await screen.findByText(/discount \(2\)/)).toBeInTheDocument();
-  });
-
-  it("names columns that exist but cannot be analysed", async () => {
-    fetchMock.mockResolvedValue(jsonResponse(datasetFixture({ extra_columns: ["zone"] })));
-    render(<App />);
-    await userEvent.click(screen.getByRole("button", { name: /use assessment dataset/i }));
-
-    expect(await screen.findByText(/not analysable/i)).toBeInTheDocument();
-    expect(screen.getByText("zone")).toBeInTheDocument();
-  });
-
   it("shows a clean message when the server is unreachable", async () => {
     fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
     render(<App />);
     await userEvent.click(screen.getByRole("button", { name: /use assessment dataset/i }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/could not reach the analysis server/i);
+    expect(screen.getByText(/no dataset loaded/i)).toBeInTheDocument();
   });
 });
 
@@ -116,28 +99,28 @@ describe("uploading a dataset", () => {
 
   it("replaces the active dataset with the uploaded one", async () => {
     fetchMock
-      .mockResolvedValueOnce(jsonResponse(datasetFixture({ source_name: "project_4.csv" })))
+      .mockResolvedValueOnce(jsonResponse(datasetFixture()))
       .mockResolvedValueOnce(
         jsonResponse(
           datasetFixture({
             source_name: "my-upload.csv",
-            row_count: 3,
-            categorical_values: { region: ["QQ"], product: ["Sprocket"] },
+            questions: ["A question only the uploaded file asks?"],
           }),
         ),
       );
     render(<App />);
 
     await userEvent.click(screen.getByRole("button", { name: /use assessment dataset/i }));
-    expect((await activePanel()).getByText("project_4.csv")).toBeInTheDocument();
+    expect((await questionPanel()).getByText("Invented question one?")).toBeInTheDocument();
 
     await userEvent.upload(screen.getByLabelText(/upload a csv file/i), csv());
 
-    await waitFor(async () => expect((await activePanel()).getByText("my-upload.csv")).toBeInTheDocument());
-    const active = await activePanel();
-    expect(active.getByText("QQ")).toBeInTheDocument();
-    expect(active.queryByText("project_4.csv")).not.toBeInTheDocument();
-    expect(active.queryByText("ZA")).not.toBeInTheDocument();
+    const panel = await questionPanel();
+    await waitFor(() =>
+      expect(panel.getByText("A question only the uploaded file asks?")).toBeInTheDocument(),
+    );
+    expect(panel.getByText(/question 1 of 1/i)).toBeInTheDocument();
+    expect(panel.queryByText("Invented question one?")).not.toBeInTheDocument();
   });
 
   it("posts the file as multipart form data", async () => {
@@ -155,18 +138,19 @@ describe("uploading a dataset", () => {
 
   it("keeps the previous dataset when an upload is rejected", async () => {
     fetchMock
-      .mockResolvedValueOnce(jsonResponse(datasetFixture({ source_name: "project_4.csv" })))
+      .mockResolvedValueOnce(jsonResponse(datasetFixture()))
       .mockResolvedValueOnce(
         jsonResponse({ detail: { code: "invalid_dataset", message: "Missing required column(s): product" } }, 400),
       );
     render(<App />);
 
     await userEvent.click(screen.getByRole("button", { name: /use assessment dataset/i }));
-    await activePanel();
+    await questionPanel();
 
     await userEvent.upload(screen.getByLabelText(/upload a csv file/i), csv());
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/missing required column/i);
-    expect((await activePanel()).getByText("project_4.csv")).toBeInTheDocument(); // still active
+    // The first dataset's questions are still the ones on offer.
+    expect((await questionPanel()).getByText("Invented question one?")).toBeInTheDocument();
   });
 });

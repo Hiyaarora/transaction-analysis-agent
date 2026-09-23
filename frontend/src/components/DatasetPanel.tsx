@@ -1,17 +1,16 @@
-/** Left column: choose a dataset, then see what was actually loaded.
+/** Left column: choose a dataset.
  *
- *  Every value shown comes from the API's DataProfile. Nothing about the
- *  data - regions, products, counts, dates - is written in this file.
+ *  The loaded dataset's profile is not shown here. The dataset it was computed
+ *  from is named in each result's explanation, which is where it matters.
  */
 
 import { useRef } from "react";
 import type { Session } from "../hooks/useSession";
-import type { DatasetState } from "../types/api";
 import { Button, Label, Notice, Panel, Spinner } from "./ui";
 
 export function DatasetPanel({ session }: { session: Session }) {
   const fileInput = useRef<HTMLInputElement>(null);
-  const { dataset, datasetStatus, datasetError, loadAssessment, upload } = session;
+  const { datasetStatus, datasetError, loadAssessment, upload } = session;
   const busy = datasetStatus === "loading";
 
   return (
@@ -54,81 +53,6 @@ export function DatasetPanel({ session }: { session: Session }) {
       </Panel>
 
       {datasetError && <Notice tone="error">{datasetError}</Notice>}
-      {dataset && <ActiveDataset dataset={dataset} />}
-    </div>
-  );
-}
-
-function ActiveDataset({ dataset }: { dataset: DatasetState }) {
-  const missing = Object.entries(dataset.null_counts).filter(([, count]) => count > 0);
-  const unreadable = Object.entries(dataset.parse_error_counts);
-
-  return (
-    <Panel label="Active dataset" className="p-5">
-      <Label>Active dataset</Label>
-      <p className="mt-3 truncate font-mono text-sm text-ink" title={dataset.source_name}>
-        {dataset.source_name}
-      </p>
-
-      <div className="mt-4 flex flex-wrap gap-x-6 gap-y-2 border-y border-line py-3">
-        <Stat value={dataset.row_count} unit={dataset.row_count === 1 ? "transaction" : "transactions"} />
-        {Object.entries(dataset.categorical_values).map(([column, values]) => (
-          <Stat key={column} value={values.length} unit={values.length === 1 ? column : `${column}s`} />
-        ))}
-      </div>
-
-      {dataset.date_range && (
-        <p className="mt-3 font-mono text-xs text-muted">
-          {dataset.date_range.start} &rarr; {dataset.date_range.end}
-        </p>
-      )}
-
-      <dl className="mt-4 flex flex-col gap-3">
-        {Object.entries(dataset.categorical_values).map(([column, values]) => (
-          <div key={column}>
-            <dt className="label">{column}</dt>
-            <dd className="mt-1 flex flex-wrap gap-1.5">
-              {values.map((value) => (
-                <span
-                  key={value}
-                  className="rounded border border-line bg-raised px-2 py-0.5 font-mono text-xs text-ink"
-                >
-                  {value}
-                </span>
-              ))}
-            </dd>
-          </div>
-        ))}
-      </dl>
-
-      <dl className="mt-4 flex flex-col gap-2 border-t border-line pt-3 text-xs">
-        <Row term="Metrics" detail={dataset.supported_metrics.join(", ")} />
-        <Row term="Missing" detail={missing.length ? missing.map(([c, n]) => `${c} (${n})`).join(", ") : "none"} />
-        {unreadable.length > 0 && (
-          <Row term="Unreadable" detail={unreadable.map(([c, n]) => `${c} (${n})`).join(", ")} />
-        )}
-        {dataset.extra_columns.length > 0 && (
-          <Row term="Not analysable" detail={dataset.extra_columns.join(", ")} />
-        )}
-      </dl>
-    </Panel>
-  );
-}
-
-function Stat({ value, unit }: { value: number; unit: string }) {
-  return (
-    <p className="flex items-baseline gap-1.5">
-      <span className="text-xl font-semibold tabular-nums">{value}</span>
-      <span className="text-xs text-muted">{unit}</span>
-    </p>
-  );
-}
-
-function Row({ term, detail }: { term: string; detail: string }) {
-  return (
-    <div className="flex gap-3">
-      <dt className="label w-24 shrink-0">{term}</dt>
-      <dd className="font-mono text-xs text-muted">{detail}</dd>
     </div>
   );
 }

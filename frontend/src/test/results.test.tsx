@@ -52,7 +52,7 @@ async function loadThenAsk(answer: AskResponse, dataset = datasetFixture()) {
   fetchMock.mockResolvedValueOnce(jsonResponse(dataset));
   render(<App />);
   await userEvent.click(screen.getByRole("button", { name: /use assessment dataset/i }));
-  await screen.findByRole("region", { name: /active dataset/i });
+  await screen.findByRole("region", { name: /ask your own question/i });
 
   fetchMock.mockResolvedValueOnce(jsonResponse(answer));
   await userEvent.type(screen.getByRole("textbox", { name: /ask your own question/i }), "my question");
@@ -229,7 +229,7 @@ describe("custom questions", () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(datasetFixture()));
     render(<App />);
     await userEvent.click(screen.getByRole("button", { name: /use assessment dataset/i }));
-    await screen.findByRole("region", { name: /active dataset/i });
+    await screen.findByRole("region", { name: /ask your own question/i });
 
     fetchMock.mockResolvedValueOnce(jsonResponse(SCALAR_ANSWER));
     await userEvent.type(
@@ -247,7 +247,7 @@ describe("custom questions", () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(datasetFixture()));
     render(<App />);
     await userEvent.click(screen.getByRole("button", { name: /use assessment dataset/i }));
-    await screen.findByRole("region", { name: /active dataset/i });
+    await screen.findByRole("region", { name: /ask your own question/i });
 
     expect(screen.getByRole("button", { name: /^ask$/i })).toBeDisabled();
     await userEvent.type(screen.getByRole("textbox", { name: /ask your own question/i }), "   ");
@@ -271,7 +271,7 @@ describe("when the backend is unreachable", () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(datasetFixture()));
     render(<App />);
     await userEvent.click(screen.getByRole("button", { name: /use assessment dataset/i }));
-    await screen.findByRole("region", { name: /active dataset/i });
+    await screen.findByRole("region", { name: /ask your own question/i });
 
     fetchMock.mockRejectedValueOnce(new TypeError("Failed to fetch"));
     await userEvent.type(screen.getByRole("textbox", { name: /ask your own question/i }), "anything");
@@ -287,7 +287,7 @@ describe("when the backend is unreachable", () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(datasetFixture()));
     render(<App />);
     await userEvent.click(screen.getByRole("button", { name: /use assessment dataset/i }));
-    await screen.findByRole("region", { name: /active dataset/i });
+    await screen.findByRole("region", { name: /ask your own question/i });
 
     const input = screen.getByRole("textbox", { name: /ask your own question/i });
     await userEvent.type(input, "anything");
@@ -309,7 +309,7 @@ describe("replacing the dataset", () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(datasetFixture()));
     render(<App />);
     await userEvent.click(screen.getByRole("button", { name: /use assessment dataset/i }));
-    await screen.findByRole("region", { name: /active dataset/i });
+    await screen.findByRole("region", { name: /ask your own question/i });
 
     fetchMock.mockResolvedValueOnce(jsonResponse(SCALAR_ANSWER));
     await userEvent.type(screen.getByRole("textbox", { name: /ask your own question/i }), "my question");
@@ -326,8 +326,59 @@ describe("replacing the dataset", () => {
       new File(["id\n"], "different.csv", { type: "text/csv" }),
     );
 
-    await waitFor(() => expect(screen.getByText("different.csv")).toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByRole("region", { name: /result/i })).not.toBeInTheDocument());
+    expect(screen.queryByText("1,234.50")).not.toBeInTheDocument();
+  });
+});
+
+describe("while a new question is processing", () => {
+  it("clears the previous answer instead of leaving it on screen", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(datasetFixture()));
+    render(<App />);
+    await userEvent.click(screen.getByRole("button", { name: /use assessment dataset/i }));
+    await screen.findByRole("region", { name: /ask your own question/i });
+
+    const input = screen.getByRole("textbox", { name: /ask your own question/i });
+    fetchMock.mockResolvedValueOnce(jsonResponse(SCALAR_ANSWER));
+    await userEvent.type(input, "first question");
+    await userEvent.click(screen.getByRole("button", { name: /^ask$/i }));
+    expect(await screen.findByText("1,234.50")).toBeInTheDocument();
+
+    // A second, different question: hold the response open and check what is
+    // on screen mid-flight.
+    let release: (value: Response) => void = () => {};
+    fetchMock.mockReturnValueOnce(new Promise<Response>((resolve) => (release = resolve)));
+    await userEvent.clear(input);
+    await userEvent.type(input, "second question");
+    await userEvent.click(screen.getByRole("button", { name: /^ask$/i }));
+
     expect(screen.queryByText("1,234.50")).not.toBeInTheDocument();
     expect(screen.queryByRole("region", { name: /result/i })).not.toBeInTheDocument();
+    expect(screen.getByText(/planning/i)).toBeInTheDocument();
+
+    release(jsonResponse({ ...SCALAR_ANSWER, intent: "Second answer" }));
+    expect(await screen.findByText("Second answer")).toBeInTheDocument();
+  });
+
+  it("clears a previous failure when the question is retried", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(datasetFixture()));
+    render(<App />);
+    await userEvent.click(screen.getByRole("button", { name: /use assessment dataset/i }));
+    await screen.findByRole("region", { name: /ask your own question/i });
+
+    const input = screen.getByRole("textbox", { name: /ask your own question/i });
+    await userEvent.type(input, "a question");
+    fetchMock.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    await userEvent.click(screen.getByRole("button", { name: /^ask$/i }));
+    expect(await screen.findByText(/something went wrong/i)).toBeInTheDocument();
+
+    let release: (value: Response) => void = () => {};
+    fetchMock.mockReturnValueOnce(new Promise<Response>((resolve) => (release = resolve)));
+    await userEvent.click(screen.getByRole("button", { name: /^ask$/i }));
+
+    expect(screen.queryByText(/something went wrong/i)).not.toBeInTheDocument();
+
+    release(jsonResponse(SCALAR_ANSWER));
+    expect(await screen.findByText("1,234.50")).toBeInTheDocument();
   });
 });

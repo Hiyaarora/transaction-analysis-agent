@@ -33,6 +33,9 @@ export function QuestionRunner({ session }: { session: Session }) {
   if (questions.length === 0) return null;
 
   async function ask() {
+    // Drop the previous answer before the new one is requested: leaving it on
+    // screen during the wait invites reading it as the answer to this question.
+    setResult(null);
     setPending(true);
     try {
       setResult(await session.ask(question));

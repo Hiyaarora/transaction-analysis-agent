@@ -87,7 +87,7 @@ describe("question navigation", () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(datasetFixture({ questions: [] })));
     render(<App />);
     await userEvent.click(screen.getByRole("button", { name: /use assessment dataset/i }));
-    await screen.findByRole("region", { name: /active dataset/i });
+    await screen.findByRole("region", { name: /ask your own question/i });
 
     expect(screen.queryByRole("region", { name: /assessment questions/i })).not.toBeInTheDocument();
   });
