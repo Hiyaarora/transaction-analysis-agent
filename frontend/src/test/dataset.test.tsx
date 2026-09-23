@@ -225,3 +225,76 @@ describe("the file in use", () => {
     expect(screen.getByRole("button", { name: /download/i })).toBeInTheDocument();
   });
 });
+
+describe("each way in becomes the file it loaded", () => {
+  it("replaces the assessment button with the file, leaving upload available", async () => {
+    fetchMock.mockResolvedValue(jsonResponse(datasetFixture({ source_name: "project_4.csv", row_count: 10 })));
+    render(<App />);
+    await userEvent.click(screen.getByRole("button", { name: /use assessment dataset/i }));
+
+    expect(await screen.findByText("project_4.csv")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /use assessment dataset/i })).not.toBeInTheDocument();
+    expect(screen.getByText(/10 transactions loaded/i)).toBeInTheDocument();
+    // The other way in is untouched, so switching is still one click.
+    expect(screen.getByRole("button", { name: /^upload csv$/i })).toBeInTheDocument();
+  });
+
+  it("replaces the upload button with the file, leaving the assessment available", async () => {
+    fetchMock.mockResolvedValue(jsonResponse(datasetFixture({ source_name: "mine.csv", row_count: 1 })));
+    render(<App />);
+    await userEvent.upload(
+      screen.getByLabelText(/upload a csv file/i),
+      new File(["id\n"], "mine.csv", { type: "text/csv" }),
+    );
+
+    expect(await screen.findByText("mine.csv")).toBeInTheDocument();
+    expect(screen.getByText(/1 transaction loaded/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^upload csv$/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /upload a different csv/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /use assessment dataset/i })).toBeInTheDocument();
+  });
+
+  it("moves the file across when the other source is used", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(datasetFixture({ source_name: "project_4.csv" })))
+      .mockResolvedValueOnce(jsonResponse(datasetFixture({ source_name: "mine.csv" })));
+    render(<App />);
+
+    await userEvent.click(screen.getByRole("button", { name: /use assessment dataset/i }));
+    await screen.findByText("project_4.csv");
+
+    await userEvent.upload(
+      screen.getByLabelText(/upload a csv file/i),
+      new File(["id\n"], "mine.csv", { type: "text/csv" }),
+    );
+
+    expect(await screen.findByText("mine.csv")).toBeInTheDocument();
+    // The assessment button is back, and its filename is no longer shown as loaded.
+    expect(screen.getByRole("button", { name: /use assessment dataset/i })).toBeInTheDocument();
+    // project_4.csv is back to being a caption, not a loaded file.
+    expect(screen.queryByRole("button", { name: /download project_4\.csv/i })).not.toBeInTheDocument();
+  });
+
+  it("downloads when the file name itself is clicked, not only the icon", async () => {
+    const click = vi.fn();
+    vi.spyOn(document, "createElement").mockImplementation(((tag: string) =>
+      tag === "a"
+        ? ({ href: "", download: "", click } as unknown as HTMLAnchorElement)
+        : document.createElementNS("http://www.w3.org/1999/xhtml", tag)) as typeof document.createElement);
+    vi.stubGlobal("URL", { ...URL, createObjectURL: () => "blob:fake", revokeObjectURL: () => {} });
+
+    fetchMock.mockResolvedValueOnce(jsonResponse(datasetFixture({ source_name: "mine.csv" })));
+    render(<App />);
+    await userEvent.click(screen.getByRole("button", { name: /use assessment dataset/i }));
+    const name = await screen.findByText("mine.csv");
+
+    fetchMock.mockResolvedValueOnce({
+      ok: true, status: 200, blob: async () => new Blob(["id\n"], { type: "text/csv" }),
+    } as Response);
+    await userEvent.click(name);  // the text, not the icon
+
+    await waitFor(() => expect(click).toHaveBeenCalled());
+    expect(fetchMock.mock.calls.some(([url]) => url === "/api/dataset/download")).toBe(true);
+    vi.restoreAllMocks();
+  });
+});

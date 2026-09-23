@@ -18,6 +18,10 @@ import type { AskResponse, DatasetState } from "../types/api";
 
 export type DatasetStatus = "idle" | "loading" | "ready" | "error";
 
+/** Where the active dataset came from, so the panel can show the file in the
+ *  place the button that loaded it used to be. */
+export type DatasetSource = "assessment" | "upload" | null;
+
 function newSessionId(): string {
   return crypto.randomUUID();
 }
@@ -27,6 +31,7 @@ export function useSession() {
   const [dataset, setDataset] = useState<DatasetState | null>(null);
   const [datasetStatus, setDatasetStatus] = useState<DatasetStatus>("idle");
   const [datasetError, setDatasetError] = useState<string | null>(null);
+  const [datasetSource, setDatasetSource] = useState<DatasetSource>(null);
 
   // A token that changes whenever the active dataset does, so cached answers
   // belong to exactly one dataset.
@@ -44,11 +49,12 @@ export function useSession() {
   }, []);
 
   const load = useCallback(
-    async (loader: () => Promise<DatasetState>) => {
+    async (loader: () => Promise<DatasetState>, source: Exclude<DatasetSource, null>) => {
       setDatasetStatus("loading");
       setDatasetError(null);
       try {
         replaceDataset(await loader());
+        setDatasetSource(source);
         return true;
       } catch (error) {
         // A failed load must not disturb the dataset already in use.
@@ -61,12 +67,12 @@ export function useSession() {
   );
 
   const loadAssessment = useCallback(
-    () => load(() => api.loadAssessmentDataset(sessionId)),
+    () => load(() => api.loadAssessmentDataset(sessionId), "assessment"),
     [load, sessionId],
   );
 
   const upload = useCallback(
-    (file: File) => load(() => api.uploadDataset(sessionId, file)),
+    (file: File) => load(() => api.uploadDataset(sessionId, file), "upload"),
     [load, sessionId],
   );
 
@@ -115,6 +121,7 @@ export function useSession() {
       dataset,
       datasetStatus,
       datasetError,
+      datasetSource,
       datasetToken,
       loadAssessment,
       upload,
@@ -122,7 +129,8 @@ export function useSession() {
       cachedAnswer,
       asking,
     }),
-    [sessionId, dataset, datasetStatus, datasetError, datasetToken, loadAssessment, upload, ask, cachedAnswer, asking],
+    [sessionId, dataset, datasetStatus, datasetError, datasetSource, datasetToken, loadAssessment, upload,
+     ask, cachedAnswer, asking],
   );
 }
 

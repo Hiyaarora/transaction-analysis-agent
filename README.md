@@ -211,7 +211,7 @@ python -m pytest                   # 449 passed, 2 skipped (warnings are errors)
 RUN_LIVE_LLM=1 python -m pytest    # also runs the two tests that call Gemini
 
 cd frontend
-npx vitest run                     # 53 passed
+npx vitest run                     # 57 passed
 npx tsc --noEmit                   # no type errors
 ```
 

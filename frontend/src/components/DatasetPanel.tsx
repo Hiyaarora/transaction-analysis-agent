@@ -1,9 +1,10 @@
-/** Left column: choose a dataset, and see which one is loaded.
+/** Left column: choose a dataset.
  *
- *  The full profile is not shown here - the dataset an answer came from is
- *  named in that answer's explanation. What this does show is the name of the
- *  file in use and a way to download it, so it can be opened in whatever the
- *  person normally uses for a spreadsheet.
+ *  Each of the two ways in is a control that becomes its result. Once the
+ *  assessment dataset is loaded, its button is the file; once a CSV has been
+ *  uploaded, the upload button is that file. The other way in keeps its button,
+ *  so switching is always one click away, and nothing restates elsewhere what
+ *  is already loaded.
  */
 
 import { useRef, useState } from "react";
@@ -14,7 +15,7 @@ import { Button, Label, Notice, Panel, Spinner } from "./ui";
 export function DatasetPanel({ session }: { session: Session }) {
   const fileInput = useRef<HTMLInputElement>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
-  const { dataset, datasetStatus, datasetError, loadAssessment, upload, sessionId } = session;
+  const { dataset, datasetStatus, datasetError, datasetSource, loadAssessment, upload, sessionId } = session;
   const busy = datasetStatus === "loading";
 
   async function download() {
@@ -27,18 +28,33 @@ export function DatasetPanel({ session }: { session: Session }) {
     }
   }
 
+  const loadedFile = dataset && (
+    <LoadedFile name={dataset.source_name} rows={dataset.row_count} onDownload={download} />
+  );
+
   return (
     <div className="flex flex-col gap-4">
       <Panel className="p-5">
         <Label>Dataset</Label>
         <h2 className="mt-3 text-base font-semibold">Assessment dataset</h2>
-        <p className="mt-1 font-mono text-xs text-muted">project_4.csv</p>
+        {/* The name is only a caption until the file is loaded; after that the
+            control below carries it, and repeating it would say it twice. */}
+        {datasetSource !== "assessment" && (
+          <p className="mt-1 font-mono text-xs text-muted">project_4.csv</p>
+        )}
         <p className="mt-3 text-sm leading-relaxed text-muted">
           The dataset supplied with the exercise, including the questions embedded in the file.
         </p>
-        <Button variant="primary" className="mt-4 w-full" onClick={loadAssessment} disabled={busy}>
-          {busy ? <Spinner /> : "Use assessment dataset"}
-        </Button>
+
+        <div className="mt-4">
+          {datasetSource === "assessment" ? (
+            loadedFile
+          ) : (
+            <Button variant="primary" className="w-full" onClick={loadAssessment} disabled={busy}>
+              {busy ? <Spinner /> : "Use assessment dataset"}
+            </Button>
+          )}
+        </div>
 
         <div className="my-5 flex items-center gap-3">
           <span className="h-px flex-1 bg-line" />
@@ -58,38 +74,73 @@ export function DatasetPanel({ session }: { session: Session }) {
             if (file) void upload(file);
           }}
         />
-        <Button className="w-full" onClick={() => fileInput.current?.click()} disabled={busy}>
-          Upload CSV
-        </Button>
-        <p className="mt-3 text-xs leading-relaxed text-faint">
-          A transaction CSV with id, date, region, product, units, unit_price and discount. Up to 5 MB.
-        </p>
 
-        {dataset && (
-          <div className="mt-5 flex items-center gap-3 border-t border-line pt-4">
-            <div className="min-w-0 flex-1">
-              <p className="label">In use</p>
-              <p className="mt-1 truncate font-mono text-sm text-ink" title={dataset.source_name}>
-                {dataset.source_name}
-              </p>
-            </div>
+        {datasetSource === "upload" ? (
+          <>
+            {loadedFile}
             <button
-              onClick={download}
-              aria-label={`Download ${dataset.source_name}`}
-              title="Download this CSV"
-              className="shrink-0 rounded-md border border-line-strong p-2 text-muted transition-colors
-                         duration-150 hover:border-faint hover:text-ink focus-visible:outline-2
-                         focus-visible:outline-offset-2 focus-visible:outline-accent-cool"
+              onClick={() => fileInput.current?.click()}
+              disabled={busy}
+              className="mt-3 text-xs text-muted underline-offset-2 transition-colors duration-150
+                         hover:text-ink hover:underline disabled:opacity-40"
             >
-              <DownloadIcon />
+              Upload a different CSV
             </button>
-          </div>
+          </>
+        ) : (
+          <>
+            <Button className="w-full" onClick={() => fileInput.current?.click()} disabled={busy}>
+              Upload CSV
+            </Button>
+            <p className="mt-3 text-xs leading-relaxed text-faint">
+              A transaction CSV with id, date, region, product, units, unit_price and discount. Up to 5 MB.
+            </p>
+          </>
         )}
       </Panel>
 
       {datasetError && <Notice tone="error">{datasetError}</Notice>}
       {downloadError && <Notice tone="error">{downloadError}</Notice>}
     </div>
+  );
+}
+
+/** The loaded file, as one control: the whole tile downloads it.
+ *
+ *  A single button rather than a row with a button inside it - nesting one
+ *  button in another is invalid, and it would make the obvious target (the
+ *  name) the one part that did nothing.
+ */
+function LoadedFile({ name, rows, onDownload }: { name: string; rows: number; onDownload: () => void }) {
+  return (
+    <button
+      onClick={onDownload}
+      aria-label={`Download ${name}`}
+      title="Download this CSV"
+      className="group flex w-full items-center gap-3 rounded-md border border-line-strong bg-raised
+                 px-3 py-2.5 text-left transition-colors duration-150 hover:border-faint
+                 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-cool"
+    >
+      <CheckIcon />
+      <span className="min-w-0 flex-1">
+        <span className="block truncate font-mono text-sm text-ink">{name}</span>
+        <span className="block text-xs text-muted">
+          {rows} transaction{rows === 1 ? "" : "s"} loaded
+        </span>
+      </span>
+      <span className="shrink-0 text-muted transition-colors duration-150 group-hover:text-ink">
+        <DownloadIcon />
+      </span>
+    </button>
+  );
+}
+
+function CheckIcon() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true" className="size-4 shrink-0 text-positive" fill="none"
+         stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="m3.5 8.5 3 3 6-7" />
+    </svg>
   );
 }
 
