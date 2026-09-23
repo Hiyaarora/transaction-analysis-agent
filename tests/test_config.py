@@ -10,7 +10,7 @@ def test_defaults(monkeypatch):
     assert s.llm_provider == "gemini"
     assert s.gemini_api_key is None
     assert s.gemini_model == "gemini-3.6-flash"
-    assert s.gemini_fallback_model is None
+    assert s.gemini_fallback_model == "gemini-3.5-flash-lite"
 
 
 def test_environment_overrides(monkeypatch):

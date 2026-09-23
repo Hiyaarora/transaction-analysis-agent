@@ -38,9 +38,16 @@ def load_settings(dotenv_path: str | Path | None = ".env") -> Settings:
     )
 
 
-def _fallback(raw: str | None) -> str | None:
-    """No second model by default: resilience comes from the optional second key.
+#: Tried when the primary model is rate limited (429) or saturated (503).
+#: A 503 is a property of the model, not of the key, so a second key cannot
+#: escape one - only a different model can. This is the only current flash
+#: model measured to accept our request config besides the primary, so it is
+#: the emergency path rather than a preference: it is markedly slower.
+DEFAULT_FALLBACK_MODEL = "gemini-3.5-flash-lite"
 
-    Set GEMINI_FALLBACK_MODEL to add one. Empty string also means "none".
-    """
+
+def _fallback(raw: str | None) -> str | None:
+    """Empty string disables the fallback; unset takes the default."""
+    if raw is None:
+        return DEFAULT_FALLBACK_MODEL
     return raw or None

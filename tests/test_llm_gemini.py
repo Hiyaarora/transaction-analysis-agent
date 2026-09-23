@@ -281,3 +281,35 @@ def test_thinking_level_is_configurable():
     )
     client.complete_json(system="s", user="u", schema=SCHEMA)
     assert sdk.models.calls[0]["config"].thinking_config.thinking_level == "LOW"
+
+
+def test_a_busy_model_is_escaped_by_trying_a_different_model_first():
+    # 503 means the model is saturated for everyone, so retrying it on another
+    # key repeats the failure. The chain must reach a different model before it
+    # reaches a different key.
+    sdks = {"key1": _StubSDK([_api_error(503), '{"a": 7}'], key="key1"),
+            "key2": _StubSDK(['{"a": 9}'], key="key2")}
+    client = GeminiClient(api_key="key1", model="primary", fallback_model="secondary",
+                          backup_api_key="key2", sdk_factory=lambda key: sdks[key])
+
+    assert client.complete_json(system="s", user="u", schema=SCHEMA) == '{"a": 7}'
+    assert [c["model"] for c in sdks["key1"].models.calls] == ["primary", "secondary"]
+    assert sdks["key2"].models.calls == []  # the second key was never needed
+
+
+def test_the_attempt_chain_covers_both_models_on_both_keys():
+    sdks = {"key1": _StubSDK([], key="key1"), "key2": _StubSDK([], key="key2")}
+    client = GeminiClient(api_key="key1", model="primary", fallback_model="secondary",
+                          backup_api_key="key2", sdk_factory=lambda key: sdks[key])
+    assert [(sdk.key, model) for sdk, model in client._attempts()] == [
+        ("key1", "primary"), ("key1", "secondary"),
+        ("key2", "primary"), ("key2", "secondary"),
+    ]
+
+
+def test_a_fallback_model_is_configured_by_default():
+    # Without one, a 503 on the primary model has nowhere to go: every attempt
+    # in the chain would use the model that is already overloaded.
+    from app.config import load_settings
+
+    assert load_settings(dotenv_path=None).gemini_fallback_model
