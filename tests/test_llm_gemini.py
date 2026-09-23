@@ -224,3 +224,37 @@ def test_not_found_is_not_retried():
     with pytest.raises(LLMError, match="404"):
         client.complete_json(system="s", user="u", schema=SCHEMA)
     assert sdks["key2"].models.calls == []
+
+
+# --- transport failures ----------------------------------------------------------------
+
+
+def test_a_transport_failure_is_translated_not_leaked():
+    # A dropped connection is not an APIError; without translation it would
+    # escape the provider abstraction and crash the caller.
+    import httpx
+
+    # A dropped connection is retryable, so both attempts on this key see it.
+    dropped = lambda: httpx.RemoteProtocolError("Server disconnected without sending a response.")  # noqa: E731
+    client, _ = make([dropped(), dropped()])
+    with pytest.raises(LLMError, match="disconnected"):
+        client.complete_json(system="s", user="u", schema=SCHEMA)
+
+
+def test_a_transport_failure_is_retried_on_the_next_key():
+    import httpx
+
+    client, sdks = _client_with_two_keys(
+        [httpx.ConnectError("connection refused"), httpx.ConnectError("connection refused")],
+        ['{"a": 5}'],
+    )
+    assert client.complete_json(system="s", user="u", schema=SCHEMA) == '{"a": 5}'
+    assert len(sdks["key2"].models.calls) == 1
+
+
+def test_no_vendor_exception_type_reaches_the_caller():
+    # Whatever the SDK throws, callers only ever have to know about LLMError.
+    for failure in (RuntimeError("sdk exploded"), OSError("socket gone")):
+        client, _ = make([failure])
+        with pytest.raises(LLMError):
+            client.complete_json(system="s", user="u", schema=SCHEMA)

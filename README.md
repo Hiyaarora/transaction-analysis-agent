@@ -206,11 +206,11 @@ there being no expressible operation outside those six tools.
 ## Testing
 
 ```bash
-python -m pytest                   # 388 passed, 2 skipped (warnings are errors)
+python -m pytest                   # 391 passed, 2 skipped (warnings are errors)
 RUN_LIVE_LLM=1 python -m pytest    # also runs the two tests that call Gemini
 
 cd frontend
-npx vitest run                     # 45 passed
+npx vitest run                     # 46 passed
 npx tsc --noEmit                   # no type errors
 ```
 
@@ -244,7 +244,7 @@ app/
   llm/             provider interface, Gemini implementation, test double
   api/             the HTTP adapter: five endpoints, a wire schema, sessions
 data/project_4.csv
-tests/             388 tests
+tests/             391 tests
 frontend/src/
   api/client.ts    the only module that speaks HTTP
   types/api.ts     the wire contract, mirroring app/api/schemas.py

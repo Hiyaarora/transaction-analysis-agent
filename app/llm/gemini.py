@@ -3,10 +3,11 @@
 Sends the planner's prompt with a JSON schema for constrained decoding and
 returns the raw text. Every SDK failure surfaces as `LLMError`.
 
-Two failures are worth retrying: a rate limit (429), because the free tier is
-small, and "this model is experiencing high demand" (503), which is transient
-and common on the flash models. The client walks a fixed sequence of attempts
-and stops at the first success:
+Three failures are worth retrying: a rate limit (429), because the free tier
+is small; "this model is experiencing high demand" (503), which is transient
+and common on the flash models; and a dropped connection, which one model was
+observed to do mid-request. The client walks a fixed sequence of attempts and
+stops at the first success:
 
     (primary key, primary model) -> (primary key, fallback model)
     -> (backup key, primary model) -> (backup key, fallback model)
@@ -15,6 +16,12 @@ The fallback model is optional; with none configured the chain is just the
 two keys. Anything else - a bad request, or a 404 because the model is not
 available to this account - is a real failure and is raised immediately
 rather than burning quota on a retry.
+
+Whatever the SDK raises, callers only ever see LLMError. A transport failure
+is not an APIError, so without translation an httpx exception would escape
+the abstraction and reach the agent, which catches only LLMError - turning a
+dropped connection into a crash instead of an honest "the model is
+unavailable".
 """
 
 from collections.abc import Callable, Iterator
@@ -26,8 +33,8 @@ from google.genai import types
 
 from app.llm.base import LLMClient, LLMError
 
-# Transient conditions worth trying the next key or model for.
-_RETRYABLE = (429, 503)
+# HTTP statuses worth trying the next key or model for.
+_RETRYABLE_CODES = (429, 503)
 
 
 class GeminiClient(LLMClient):
@@ -69,7 +76,7 @@ class GeminiClient(LLMClient):
             try:
                 return self._generate(sdk, model, user, config)
             except _LLMApiError as exc:
-                if exc.code not in _RETRYABLE:
+                if not exc.retryable:
                     raise
                 transient = exc  # try the next key or model
         raise transient  # every attempt hit a transient failure
@@ -84,19 +91,32 @@ class GeminiClient(LLMClient):
         try:
             response = sdk.models.generate_content(model=model, contents=user, config=config)
         except genai_errors.APIError as exc:
-            raise _LLMApiError(f"Gemini error {exc.code} on {model}: {exc.message}", code=exc.code) from exc
+            raise _LLMApiError(
+                f"Gemini error {exc.code} on {model}: {exc.message}",
+                code=exc.code,
+                retryable=exc.code in _RETRYABLE_CODES,
+            ) from exc
+        except Exception as exc:
+            # Connection resets, timeouts, anything else the SDK or its HTTP
+            # stack throws. Wrapped rather than enumerated: the contract is
+            # that no vendor exception type reaches the caller. The original
+            # is chained, so nothing is hidden from a traceback.
+            raise _LLMApiError(f"Gemini request to {model} failed: {exc}", retryable=True) from exc
+
         text = response.text
         if not text:
-            raise _LLMApiError(f"Gemini returned an empty reply on {model}.", code=None)
+            # A reply with no content is a real failure, not a transient one.
+            raise _LLMApiError(f"Gemini returned an empty reply on {model}.")
         return text
 
 
 class _LLMApiError(LLMError):
-    """LLMError that remembers the HTTP status, so the retry decision can see it."""
+    """LLMError that remembers whether trying another key or model is worthwhile."""
 
-    def __init__(self, message: str, code: int | None) -> None:
+    def __init__(self, message: str, code: int | None = None, retryable: bool = False) -> None:
         super().__init__(message)
         self.code = code
+        self.retryable = retryable
 
 
 def _gemini_schema(schema: dict) -> dict:
