@@ -1,0 +1,45 @@
+# One Render web service: the FastAPI process serves /api/* and, from the same
+# origin, the React production build. One URL, no CORS, one place for the API
+# key - it stays in this process and never reaches the browser.
+#
+# The Python version is pinned in .python-version, not here, so a local pyenv
+# and the deploy agree on one number.
+
+services:
+  - type: web
+    name: transaction-analysis-agent
+    runtime: python
+    plan: free
+    region: oregon
+
+    # Node is available in Render's Python runtime, so the UI is built from the
+    # deployed commit rather than committed as build output. Order matters only
+    # in that both must finish before the service starts.
+    buildCommand: pip install -r requirements.txt && cd frontend && npm ci && npm run build
+
+    # One process, one worker: sessions live in this process's memory.
+    startCommand: python run_api.py
+
+    # Cheap, needs no session header, and never calls the provider.
+    healthCheckPath: /api/health
+
+    envVars:
+      - key: LLM_PROVIDER
+        value: groq
+
+      - key: GROQ_MODEL
+        value: openai/gpt-oss-120b
+
+      # Set in the Render dashboard, never in the repository. `sync: false`
+      # is what tells Render not to expect a value here.
+      - key: GROQ_API_KEY
+        sync: false
+
+      # The fallback provider needs its own key to be worth anything; leave it
+      # empty unless GEMINI_API_KEY is also set in the dashboard.
+      - key: LLM_FALLBACK_PROVIDER
+        value: ""
+
+      # Python writes .pyc files the container will never reuse.
+      - key: PYTHONDONTWRITEBYTECODE
+        value: "1"

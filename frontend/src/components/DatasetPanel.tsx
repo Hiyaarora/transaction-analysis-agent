@@ -9,14 +9,16 @@
 
 import { useRef, useState } from "react";
 import { ApiError, downloadDataset } from "../api/client";
+import { useSlowRequest } from "../hooks/useSlowRequest";
 import type { Session } from "../hooks/useSession";
-import { Button, Label, Notice, Panel, Spinner } from "./ui";
+import { Button, Label, Notice, Panel, Spinner, WakingNotice } from "./ui";
 
 export function DatasetPanel({ session }: { session: Session }) {
   const fileInput = useRef<HTMLInputElement>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const { dataset, datasetStatus, datasetError, datasetSource, loadAssessment, upload, sessionId } = session;
   const busy = datasetStatus === "loading";
+  const slow = useSlowRequest(busy);
 
   async function download() {
     if (!dataset) return;
@@ -97,6 +99,7 @@ export function DatasetPanel({ session }: { session: Session }) {
             </p>
           </>
         )}
+        {slow && <WakingNotice />}
       </Panel>
 
       {datasetError && <Notice tone="error">{datasetError}</Notice>}

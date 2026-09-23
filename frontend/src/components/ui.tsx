@@ -68,3 +68,17 @@ export function Notice({ tone, children }: { tone: "error" | "info"; children: R
     </p>
   );
 }
+
+/** Shown when a request has been waiting long enough to look stuck.
+ *
+ *  Deliberately not an error: nothing has gone wrong, the server is starting.
+ *  The text names the cause so the wait is legible rather than alarming.
+ */
+export function WakingNotice() {
+  return (
+    <p role="status" className="mt-3 text-xs leading-relaxed text-muted">
+      Still working. The server sleeps after a spell without traffic, so the first request after a
+      quiet period waits for it to start &mdash; this can take up to a minute.
+    </p>
+  );
+}

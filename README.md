@@ -63,15 +63,16 @@ in the tool interface. A test enforces that the `app/` package contains no
 
 ## Quick start
 
-Requires Python 3.12+ and a Gemini API key
-([free tier](https://aistudio.google.com/apikey), no card needed).
+Requires Python 3.12 and a Groq API key
+([free tier](https://console.groq.com/keys), no card needed). Gemini works too
+- see Configuration.
 
 ```bash
 python -m venv .venv
 .venv\Scripts\activate          # Windows;  source .venv/bin/activate elsewhere
 pip install -r requirements.txt
 
-cp .env.example .env            # then put your key in GEMINI_API_KEY
+cp .env.example .env            # then put your key in GROQ_API_KEY
 
 python run.py --data data/project_4.csv
 ```
@@ -207,11 +208,11 @@ there being no expressible operation outside those six tools.
 ## Testing
 
 ```bash
-python -m pytest                   # 449 passed, 2 skipped (warnings are errors)
+python -m pytest                   # 459 passed, 2 skipped (warnings are errors)
 RUN_LIVE_LLM=1 python -m pytest    # also runs the two tests that call Gemini
 
 cd frontend
-npx vitest run                     # 57 passed
+npx vitest run                     # 62 passed
 npx tsc --noEmit                   # no type errors
 ```
 
@@ -243,16 +244,19 @@ app/
   renderer.py      answer / operations performed / explanation
   cli.py           the interactive session
   llm/             provider interface, Gemini and Groq clients, cross-provider fallback, factory, test double
-  api/             the HTTP adapter: five endpoints, a wire schema, sessions
+  api/             the HTTP adapter: six endpoints, a wire schema, sessions,
+                   and the built UI served from the same origin
 data/project_4.csv
-tests/             449 tests
+tests/             459 tests
 frontend/src/
   api/client.ts    the only module that speaks HTTP
   types/api.ts     the wire contract, mirroring app/api/schemas.py
-  hooks/           session id, active dataset, answer cache
+  hooks/           session id, active dataset, answer cache, long-wait notice
   components/      dataset panel, question runner, result display
 run.py             the terminal session
-run_api.py         the web API
+run_api.py         the web API (0.0.0.0:$PORT)
+render.yaml        the deployment: build, start, health check, env vars
+.python-version    the pinned interpreter
 ```
 
 ### The HTTP adapter
@@ -265,6 +269,11 @@ run_api.py         the web API
 | `GET` | `/api/dataset` | the active dataset for this session |
 | `GET` | `/api/dataset/download` | the CSV itself, to open in a spreadsheet |
 | `POST` | `/api/ask` | ask a question |
+
+`/api/health` takes no session header and calls no provider, so it is safe to
+use as a platform health check. Every other path is served by the React build:
+an unknown one falls back to `index.html`, except under `/api`, where a missing
+endpoint stays a JSON 404 rather than becoming HTML the client cannot parse.
 
 Each handler looks up a session, calls an existing function and converts the
 result; a test asserts that nothing under `app/api` touches pandas or calls
@@ -282,7 +291,7 @@ analysis, and replacing the dataset replaces them.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `GEMINI_API_KEY` | – | required |
+| `GEMINI_API_KEY` | – | required when the provider is `gemini` |
 | `GEMINI_API_KEY_2` | – | optional second key, tried when the first is rate limited (a quota escape attempt, not a guarantee) |
 | `GEMINI_MODEL` | `gemini-3.6-flash` | planning model |
 | `GEMINI_FALLBACK_MODEL` | none | optional second model, tried on a 429 or 503 |
@@ -291,6 +300,70 @@ analysis, and replacing the dataset replaces them.
 | `LLM_FALLBACK_PROVIDER` | `gemini` | asked only when the primary provider cannot answer at all |
 | `GROQ_API_KEY` | - | required when the provider is `groq` |
 | `GROQ_MODEL` | `openai/gpt-oss-120b` | Groq planning model |
+
+## Deployment
+
+One Render web service. The FastAPI process serves `/api/*` and, from the same
+origin, the React production build in `frontend/dist`:
+
+```
+browser  ->  https://<service>.onrender.com/          index.html + hashed assets
+             https://<service>.onrender.com/api/ask   the agent
+```
+
+One origin is the point. There is no CORS configuration in production because
+the browser never makes a cross-origin request, and the provider key stays in
+this process - the React app has no key, no SDK and no provider logic, so
+there is nothing in the bundle to leak.
+
+`render.yaml` holds the whole configuration:
+
+| | |
+|---|---|
+| Build | `pip install -r requirements.txt && cd frontend && npm ci && npm run build` |
+| Start | `python run_api.py` |
+| Health check | `/api/health` |
+| Python | pinned in `.python-version` |
+
+`run_api.py` binds `0.0.0.0` and reads `$PORT`, which the platform assigns; with
+neither set it is still `http://localhost:8000`. `GROQ_API_KEY` is the one
+value that is not in the repository: it is set in the Render dashboard
+(`sync: false` in `render.yaml` is what says so).
+
+To check the production shape locally, build the UI and run the API alone -
+no Vite, one port, exactly as deployed:
+
+```bash
+cd frontend && npm run build && cd ..
+python run_api.py                 # http://localhost:8000 serves the UI and the API
+```
+
+### Known characteristics of this deployment
+
+These are properties of a free single-instance demo, not bugs, and each one is
+a deliberate trade rather than an oversight:
+
+* **The service sleeps.** A free Render web service spins down after about 15
+  minutes without traffic. The next visit pays a cold start of roughly 30-60
+  seconds. Because the same service serves the page itself, that wait usually
+  happens while the page is loading; if the service falls asleep with a tab
+  already open, the next request carries it instead - which is what the
+  "this can take up to a minute" notice in the UI is for.
+* **Sessions do not survive a restart.** A session lives in this process's
+  memory (`app/api/sessions.py`), so a redeploy, a crash or a spin-down clears
+  every loaded dataset. The UI reports "No dataset is loaded for this session"
+  and loading one again is the whole recovery.
+* **Uploads are not persisted.** An uploaded CSV is parsed into memory and its
+  temporary file is deleted immediately, on success and on failure alike
+  (`app/api/routes.py`). The bytes kept for the download button live in the
+  session, so they go when it does. Nothing is written to a disk that outlives
+  the request.
+* **One instance, one worker.** Sessions are in-process, so a second worker or
+  a second instance would answer roughly half of a user's requests with "no
+  dataset". Scaling horizontally would mean moving session state out of the
+  process first - a shared store, or a dataset identifier the client sends with
+  each request. That is a real change, not a configuration flag, and it is out
+  of scope for a demo.
 
 ## Limitations
 

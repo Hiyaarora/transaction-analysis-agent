@@ -39,7 +39,7 @@ async function request<T>(path: string, sessionId: string, init: RequestInit = {
     throw new ApiError(
       aborted
         ? "The request took too long and was cancelled."
-        : "Could not reach the analysis server. Is it running?",
+        : "Could not reach the analysis server. It may be starting up after a quiet period - try again in a moment.",
       aborted ? "timeout" : "offline",
     );
   } finally {

@@ -38,3 +38,8 @@ httpx2>=2.12
 # schema as response_json_schema gives constrained JSON decoding; parse_plan
 # still validates every reply, so this is an optimisation, not the guarantee.
 google-genai>=2.24,<3
+
+# Groq SDK — imported only by app/llm/groq.py, and the default provider
+# (LLM_PROVIDER=groq). app/llm/factory.py imports both clients at module load,
+# so this is not optional: without it the API cannot start at all.
+groq>=1.7,<2

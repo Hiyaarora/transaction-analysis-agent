@@ -7,15 +7,17 @@
 
 import { useEffect, useState } from "react";
 import type { Session } from "../hooks/useSession";
+import { useSlowRequest } from "../hooks/useSlowRequest";
 import type { AskResponse } from "../types/api";
 import { ResultView } from "./ResultView";
-import { Button, Label, Panel, Spinner } from "./ui";
+import { Button, Label, Panel, Spinner, WakingNotice } from "./ui";
 
 export function QuestionRunner({ session }: { session: Session }) {
   const questions = session.dataset?.questions ?? [];
   const [index, setIndex] = useState(0);
   const [result, setResult] = useState<AskResponse | null>(null);
   const [pending, setPending] = useState(false);
+  const slow = useSlowRequest(pending);
 
   const question = questions[index];
 
@@ -70,6 +72,8 @@ export function QuestionRunner({ session }: { session: Session }) {
           <p className="font-mono text-xs text-faint">Planning &rarr; Validating &rarr; Computing</p>
         )}
       </div>
+
+      {slow && <WakingNotice />}
 
       {result && (
         <div className="mt-5">

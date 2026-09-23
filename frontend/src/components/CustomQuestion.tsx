@@ -8,14 +8,16 @@
 
 import { useEffect, useState } from "react";
 import type { Session } from "../hooks/useSession";
+import { useSlowRequest } from "../hooks/useSlowRequest";
 import type { AskResponse } from "../types/api";
 import { ResultView } from "./ResultView";
-import { Button, Label, Panel, Spinner } from "./ui";
+import { Button, Label, Panel, Spinner, WakingNotice } from "./ui";
 
 export function CustomQuestion({ session }: { session: Session }) {
   const [text, setText] = useState("");
   const [result, setResult] = useState<AskResponse | null>(null);
   const [pending, setPending] = useState(false);
+  const slow = useSlowRequest(pending);
 
   const question = text.trim();
 
@@ -61,6 +63,7 @@ export function CustomQuestion({ session }: { session: Session }) {
       </div>
 
       {pending && <p className="mt-3 font-mono text-xs text-faint">Planning &rarr; Validating &rarr; Computing</p>}
+      {slow && <WakingNotice />}
 
       {result && session.dataset && (
         <div className="mt-5">
