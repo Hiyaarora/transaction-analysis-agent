@@ -206,7 +206,7 @@ there being no expressible operation outside those six tools.
 ## Testing
 
 ```bash
-python -m pytest                   # 393 passed, 2 skipped (warnings are errors)
+python -m pytest                   # 404 passed, 2 skipped (warnings are errors)
 RUN_LIVE_LLM=1 python -m pytest    # also runs the two tests that call Gemini
 
 cd frontend
@@ -244,7 +244,7 @@ app/
   llm/             provider interface, Gemini implementation, test double
   api/             the HTTP adapter: five endpoints, a wire schema, sessions
 data/project_4.csv
-tests/             393 tests
+tests/             404 tests
 frontend/src/
   api/client.ts    the only module that speaks HTTP
   types/api.ts     the wire contract, mirroring app/api/schemas.py
@@ -279,7 +279,7 @@ leaves the previous dataset active.
 | Variable | Default | Purpose |
 |---|---|---|
 | `GEMINI_API_KEY` | – | required |
-| `GEMINI_API_KEY_2` | – | optional second key, tried automatically when the first is rate limited |
+| `GEMINI_API_KEY_2` | – | optional second key, tried when the first is rate limited (a quota escape attempt, not a guarantee) |
 | `GEMINI_MODEL` | `gemini-3.6-flash` | planning model |
 | `GEMINI_FALLBACK_MODEL` | none | optional second model, tried on a 429 or 503 |
 | `GEMINI_THINKING_LEVEL` | `MINIMAL` | how hard the model may reason before answering |

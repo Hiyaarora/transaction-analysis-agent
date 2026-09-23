@@ -174,11 +174,12 @@ def _client_with_two_keys(primary_outcomes, backup_outcomes):
     return client, sdks
 
 
-def test_second_key_is_used_only_after_the_first_key_is_rate_limited():
-    client, sdks = _client_with_two_keys([_api_error(429), _api_error(429)], ['{"a": 3}'])
+def test_second_key_is_used_when_the_first_key_is_rate_limited():
+    client, sdks = _client_with_two_keys([_api_error(429)], ['{"a": 3}'])
     assert client.complete_json(system="s", user="u", schema=SCHEMA) == '{"a": 3}'
-    # First key: both models tried. Second key: primary model, which succeeded.
-    assert [c["model"] for c in sdks["key1"].models.calls] == ["gemini-2.5-flash", "gemini-2.5-flash-lite"]
+    # A spent quota belongs to the key, so the other key is tried before the
+    # other model - one request each, not both models on the exhausted key.
+    assert [c["model"] for c in sdks["key1"].models.calls] == ["gemini-2.5-flash"]
     assert [c["model"] for c in sdks["key2"].models.calls] == ["gemini-2.5-flash"]
 
 
@@ -195,12 +196,13 @@ def test_second_key_is_not_tried_for_a_non_rate_limit_error():
     assert sdks["key2"].models.calls == []
 
 
-def test_exhausting_every_key_and_model_raises_the_last_rate_limit():
-    client, sdks = _client_with_two_keys([_api_error(429)] * 2, [_api_error(429)] * 2)
+def test_exhausting_the_escapes_raises_the_last_rate_limit():
+    from app.llm.gemini import MAX_ATTEMPTS
+
+    client, sdks = _client_with_two_keys([_api_error(429)] * 3, [_api_error(429)] * 3)
     with pytest.raises(LLMError, match="429"):
         client.complete_json(system="s", user="u", schema=SCHEMA)
-    assert len(sdks["key1"].models.calls) == 2
-    assert len(sdks["key2"].models.calls) == 2
+    assert sum(len(sdk.models.calls) for sdk in sdks.values()) == MAX_ATTEMPTS
 
 
 def test_a_blank_backup_key_is_ignored():
@@ -297,19 +299,100 @@ def test_a_busy_model_is_escaped_by_trying_a_different_model_first():
     assert sdks["key2"].models.calls == []  # the second key was never needed
 
 
-def test_the_attempt_chain_covers_both_models_on_both_keys():
-    sdks = {"key1": _StubSDK([], key="key1"), "key2": _StubSDK([], key="key2")}
-    client = GeminiClient(api_key="key1", model="primary", fallback_model="secondary",
-                          backup_api_key="key2", sdk_factory=lambda key: sdks[key])
-    assert [(sdk.key, model) for sdk, model in client._attempts()] == [
-        ("key1", "primary"), ("key1", "secondary"),
-        ("key2", "primary"), ("key2", "secondary"),
-    ]
-
-
 def test_a_fallback_model_is_configured_by_default():
     # Without one, a 503 on the primary model has nowhere to go: every attempt
     # in the chain would use the model that is already overloaded.
     from app.config import load_settings
 
     assert load_settings(dotenv_path=None).gemini_fallback_model
+
+
+# --- the escape is chosen by the failure ---------------------------------------------
+#
+# 429 means this key's quota is spent, so another key may help.
+# 503 means the model is saturated for everyone, so another key repeats the
+# failure and only another model can help.
+# The chain is bounded: at most MAX_ATTEMPTS requests leave the process.
+
+
+def _client(primary_outcomes, backup_outcomes=None, *, fallback="secondary", backup_key="key2"):
+    sdks = {"key1": _StubSDK(primary_outcomes, key="key1")}
+    if backup_key:
+        sdks[backup_key] = _StubSDK(backup_outcomes or [], key=backup_key)
+    client = GeminiClient(
+        api_key="key1", model="primary", fallback_model=fallback,
+        backup_api_key=backup_key, sdk_factory=lambda key: sdks[key],
+    )
+    return client, sdks
+
+
+def _models_called(sdks):
+    return {key: [c["model"] for c in sdk.models.calls] for key, sdk in sdks.items()}
+
+
+def test_503_tries_a_different_model_and_not_another_key():
+    client, sdks = _client([_api_error(503), '{"a": 1}'], ['{"a": 2}'])
+    assert client.complete_json(system="s", user="u", schema=SCHEMA) == '{"a": 1}'
+    assert _models_called(sdks) == {"key1": ["primary", "secondary"], "key2": []}
+
+
+def test_429_tries_the_alternate_key_before_a_different_model():
+    client, sdks = _client([_api_error(429)], ['{"a": 2}'])
+    assert client.complete_json(system="s", user="u", schema=SCHEMA) == '{"a": 2}'
+    assert _models_called(sdks) == {"key1": ["primary"], "key2": ["primary"]}
+
+
+def test_429_falls_back_to_another_model_when_no_alternate_key_is_configured():
+    client, sdks = _client([_api_error(429), '{"a": 1}'], backup_key=None)
+    assert client.complete_json(system="s", user="u", schema=SCHEMA) == '{"a": 1}'
+    assert _models_called(sdks) == {"key1": ["primary", "secondary"]}
+
+
+def test_503_falls_back_to_another_key_when_no_fallback_model_is_configured():
+    client, sdks = _client([_api_error(503)], ['{"a": 2}'], fallback=None)
+    assert client.complete_json(system="s", user="u", schema=SCHEMA) == '{"a": 2}'
+    assert _models_called(sdks) == {"key1": ["primary"], "key2": ["primary"]}
+
+
+def test_when_the_escape_also_fails_the_provider_error_is_surfaced():
+    client, sdks = _client([_api_error(503), _api_error(503)], [_api_error(503)])
+    with pytest.raises(LLMError, match="503"):
+        client.complete_json(system="s", user="u", schema=SCHEMA)
+
+
+def test_the_chain_is_bounded():
+    from app.llm.gemini import MAX_ATTEMPTS
+
+    # Every combination fails: the client must stop, not keep hunting.
+    client, sdks = _client([_api_error(503)] * 5, [_api_error(503)] * 5)
+    with pytest.raises(LLMError):
+        client.complete_json(system="s", user="u", schema=SCHEMA)
+    total = sum(len(sdk.models.calls) for sdk in sdks.values())
+    assert total == MAX_ATTEMPTS
+    assert MAX_ATTEMPTS <= 3
+
+
+def test_a_non_retryable_error_costs_exactly_one_request():
+    client, sdks = _client([_api_error(400)], ['{"a": 2}'])
+    with pytest.raises(LLMError, match="400"):
+        client.complete_json(system="s", user="u", schema=SCHEMA)
+    assert sum(len(sdk.models.calls) for sdk in sdks.values()) == 1
+
+
+def test_no_combination_is_attempted_twice():
+    client, sdks = _client([_api_error(429), _api_error(503)], [_api_error(429), _api_error(503)])
+    with pytest.raises(LLMError):
+        client.complete_json(system="s", user="u", schema=SCHEMA)
+    attempts = [(key, model) for key, models in _models_called(sdks).items() for model in models]
+    assert len(attempts) == len(set(attempts))
+
+
+def test_error_messages_never_carry_key_material():
+    secret = "AQ.super-secret-key-value"
+    sdk = _StubSDK([_api_error(400)])
+    client = GeminiClient(api_key=secret, model="primary", fallback_model=None,
+                          sdk_factory=lambda key: sdk)
+    with pytest.raises(LLMError) as raised:
+        client.complete_json(system="s", user="u", schema=SCHEMA)
+    assert secret not in str(raised.value)
+    assert "super-secret" not in str(raised.value)

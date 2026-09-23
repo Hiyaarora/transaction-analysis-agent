@@ -3,18 +3,24 @@
 Sends the planner's prompt with a JSON schema for constrained decoding and
 returns the raw text. Every SDK failure surfaces as `LLMError`.
 
-Three failures are worth retrying: a rate limit (429), because the free tier
-is small; "this model is experiencing high demand" (503), which is transient
-and common on the flash models; and a dropped connection, which one model was
-observed to do mid-request. The client walks a fixed sequence of attempts and
-stops at the first success:
+Three failures are worth retrying, and which escape helps depends on which
+one occurred:
 
-    (primary key, primary model) -> (primary key, fallback model)
-    -> (backup key, primary model) -> (backup key, fallback model)
+    429  this key's quota is spent        -> try the other KEY, same model
+    503  the model is busy for everyone   -> try the other MODEL, same key
+    dropped connection                    -> like 503; the model may be sick
 
-The fallback model is optional; with none configured the chain is just the
-two keys. Anything else - a bad request, or a 404 because the model is not
-available to this account - is a real failure and is raised immediately
+Retrying a 503 on a second key just repeats the request that failed, because
+capacity is a property of the model rather than of the key. Sending a 429 to
+a different model on the same key may or may not help, since quota can be
+shared across models, so the alternate key is tried first and the other model
+only if no alternate key is configured.
+
+Each escape falls back to the other kind when its preferred one is not
+configured, and no combination of key and model is attempted twice. The chain
+is capped at MAX_ATTEMPTS: a provider having a bad minute must not turn one
+question into a burst of requests. Anything else - a bad request, or a 404
+because the model is not available to this account - is raised immediately
 rather than burning quota on a retry.
 
 Whatever the SDK raises, callers only ever see LLMError. A transport failure
@@ -24,7 +30,7 @@ dropped connection into a crash instead of an honest "the model is
 unavailable".
 """
 
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from typing import Any
 
 from google import genai
@@ -41,8 +47,15 @@ from app.llm.base import LLMClient, LLMError
 # full depth, which measured 30-55s per plan against 10-12s here.
 DEFAULT_THINKING_LEVEL = "MINIMAL"
 
-# HTTP statuses worth trying the next key or model for.
+# HTTP statuses worth escaping from rather than surfacing straight away.
 _RETRYABLE_CODES = (429, 503)
+
+# A question is one request plus, at most, two escapes. A provider having a
+# bad minute must not turn one question into a burst of traffic.
+MAX_ATTEMPTS = 3
+
+# (index into self._sdks, model name)
+_Attempt = tuple[int, str]
 
 
 class GeminiClient(LLMClient):
@@ -81,21 +94,44 @@ class GeminiClient(LLMClient):
             automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
         )
 
+        attempt: _Attempt = (0, self.model)
+        tried: set[_Attempt] = set()
         transient: LLMError | None = None
-        for sdk, model in self._attempts():
+
+        for _ in range(MAX_ATTEMPTS):
+            tried.add(attempt)
+            key_index, model = attempt
             try:
-                return self._generate(sdk, model, user, config)
+                return self._generate(self._sdks[key_index], model, user, config)
             except _LLMApiError as exc:
                 if not exc.retryable:
                     raise
-                transient = exc  # try the next key or model
-        raise transient  # every attempt hit a transient failure
+                transient = exc
+                following = self._escape_from(exc, attempt, tried)
+                if following is None:
+                    break  # nothing left that has not already failed
+                attempt = following
 
-    def _attempts(self) -> Iterator[tuple[Any, str]]:
-        for sdk in self._sdks:
-            yield sdk, self.model
-            if self.fallback_model:
-                yield sdk, self.fallback_model
+        raise transient  # every escape was exhausted
+
+    def _escape_from(self, failure: "_LLMApiError", attempt: _Attempt, tried: set[_Attempt]) -> _Attempt | None:
+        """Where to go after `failure`, or None when there is nowhere useful left."""
+        key_index, model = attempt
+        other_key = 1 - key_index if len(self._sdks) > 1 else None
+        other_model = self.fallback_model if model == self.model else self.model
+
+        change_key = (other_key, model) if other_key is not None else None
+        change_model = (key_index, other_model) if other_model else None
+        # A spent quota is a property of the key; a busy model is a property of
+        # the model. Prefer the escape that matches the failure, then take the
+        # other one, then any combination not yet tried.
+        preferred = [change_key, change_model] if failure.code == 429 else [change_model, change_key]
+        both_changed = (other_key, other_model) if other_key is not None and other_model else None
+
+        for candidate in [*preferred, both_changed]:
+            if candidate and candidate not in tried:
+                return candidate
+        return None
 
     def _generate(self, sdk: Any, model: str, user: str, config: types.GenerateContentConfig) -> str:
         try:
