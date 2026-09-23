@@ -224,3 +224,54 @@ describe("asking an assessment question", () => {
     expect(panel.getByText(/quota exceeded/i)).toBeInTheDocument();
   });
 });
+
+describe("retrying a question that failed", () => {
+  const providerError = {
+    status: "error",
+    question: QUESTIONS[0],
+    message: "The planning model is unavailable: Gemini error 503 on gemini-3.6-flash",
+  };
+
+  it("asks again after a provider error, rather than replaying the stored failure", async () => {
+    const panel = await loadDataset();
+
+    // A provider failure arrives as HTTP 200 with status "error", so it takes
+    // the same path as an answer. It must not be remembered as one.
+    fetchMock.mockResolvedValueOnce(jsonResponse(providerError));
+    await userEvent.click(panel.getByRole("button", { name: /^ask question$/i }));
+    expect(await panel.findByText(/something went wrong/i)).toBeInTheDocument();
+    expect(askCalls()).toHaveLength(1);
+
+    fetchMock.mockResolvedValueOnce(jsonResponse(answerFixture(QUESTIONS[0], 42)));
+    await userEvent.click(panel.getByRole("button", { name: /^ask question$/i }));
+
+    expect(await panel.findByText("42")).toBeInTheDocument();
+    expect(askCalls()).toHaveLength(2);
+  });
+
+  it("still remembers a successful answer after an earlier failure", async () => {
+    const panel = await loadDataset();
+    fetchMock.mockResolvedValueOnce(jsonResponse(providerError));
+    await userEvent.click(panel.getByRole("button", { name: /^ask question$/i }));
+    await panel.findByText(/something went wrong/i);
+
+    fetchMock.mockResolvedValueOnce(jsonResponse(answerFixture(QUESTIONS[0], 42)));
+    await userEvent.click(panel.getByRole("button", { name: /^ask question$/i }));
+    await panel.findByText("42");
+
+    await userEvent.click(panel.getByRole("button", { name: /^ask question$/i }));
+    await waitFor(() => expect(askCalls()).toHaveLength(2));  // the answer is cached
+  });
+
+  it("caches a clarification and a rejection, which are real answers", async () => {
+    const panel = await loadDataset();
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ status: "rejected", question: QUESTIONS[0], message: "I cannot run code." }),
+    );
+    await userEvent.click(panel.getByRole("button", { name: /^ask question$/i }));
+    await panel.findByText(/request rejected/i);
+
+    await userEvent.click(panel.getByRole("button", { name: /^ask question$/i }));
+    await waitFor(() => expect(askCalls()).toHaveLength(1));
+  });
+});

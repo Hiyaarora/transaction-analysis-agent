@@ -86,11 +86,17 @@ export function useSession() {
       setAsking(true);
       try {
         const response = await api.askQuestion(sessionId, question);
-        answers.current.set(key, response);
+        // A failure is never remembered. An answer, a clarification and a
+        // rejection are all determined by the question and the dataset, so
+        // they will not change; an error is a moment in time - the provider
+        // was busy - and asking again is the whole point of asking again.
+        // Note this arrives as HTTP 200 with status "error", so it reaches
+        // here rather than the catch below.
+        if (response.status !== "error") answers.current.set(key, response);
         return response;
       } catch (error) {
-        // Transport failures are shown like any other non-answer, and are not
-        // cached: the next attempt should really try again.
+        // A transport failure never got as far as a status, and is likewise
+        // not cached.
         return {
           status: "error",
           question,

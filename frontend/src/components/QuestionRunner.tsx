@@ -26,9 +26,16 @@ export function QuestionRunner({ session }: { session: Session }) {
   }, [session.datasetToken]);
 
   // Showing a question shows whatever was already answered for it - no request.
+  //
+  // The dependency is `cachedAnswer`, not `session`: the session object is a
+  // new value on every state change, so depending on it would re-run this
+  // after each ask and wipe a result that is deliberately not cached, such as
+  // a provider failure the user is about to retry. `cachedAnswer` changes only
+  // when the dataset does.
+  const { cachedAnswer } = session;
   useEffect(() => {
-    setResult(question ? session.cachedAnswer(question) : null);
-  }, [question, session]);
+    setResult(question ? cachedAnswer(question) : null);
+  }, [question, cachedAnswer]);
 
   if (questions.length === 0) return null;
 

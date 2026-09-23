@@ -14,6 +14,8 @@ from dotenv import load_dotenv
 @dataclass(frozen=True)
 class Settings:
     llm_provider: str
+    #: Asked when the primary provider cannot answer at all. None disables it.
+    llm_fallback_provider: str | None
     gemini_api_key: str | None
     #: Optional second key, tried when the first is rate limited.
     gemini_api_key_2: str | None
@@ -31,6 +33,7 @@ def load_settings(dotenv_path: str | Path | None = ".env") -> Settings:
         load_dotenv(dotenv_path, override=False)
     return Settings(
         llm_provider=os.getenv("LLM_PROVIDER", "gemini"),
+        llm_fallback_provider=os.getenv("LLM_FALLBACK_PROVIDER") or None,
         gemini_api_key=os.getenv("GEMINI_API_KEY") or None,
         gemini_api_key_2=os.getenv("GEMINI_API_KEY_2") or None,
         gemini_model=os.getenv("GEMINI_MODEL") or "gemini-3.6-flash",

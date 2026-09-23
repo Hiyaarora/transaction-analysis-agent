@@ -373,7 +373,8 @@ def test_health_reports_on_the_configured_provider_not_a_fixed_one(client, monke
 
     def configured(provider, gemini_key, groq_key):
         return lambda *a, **k: Settings(
-            llm_provider=provider, gemini_api_key=gemini_key, gemini_api_key_2=None,
+            llm_provider=provider, llm_fallback_provider=None,
+            gemini_api_key=gemini_key, gemini_api_key_2=None,
             gemini_model="m", gemini_fallback_model=None, gemini_thinking_level="MINIMAL",
             groq_api_key=groq_key, groq_model="m",
         )

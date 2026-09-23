@@ -206,11 +206,11 @@ there being no expressible operation outside those six tools.
 ## Testing
 
 ```bash
-python -m pytest                   # 422 passed, 2 skipped (warnings are errors)
+python -m pytest                   # 433 passed, 2 skipped (warnings are errors)
 RUN_LIVE_LLM=1 python -m pytest    # also runs the two tests that call Gemini
 
 cd frontend
-npx vitest run                     # 46 passed
+npx vitest run                     # 49 passed
 npx tsc --noEmit                   # no type errors
 ```
 
@@ -241,10 +241,10 @@ app/
   agent.py         the pipeline, wired
   renderer.py      answer / operations performed / explanation
   cli.py           the interactive session
-  llm/             provider interface, Gemini and Groq implementations, factory, test double
+  llm/             provider interface, Gemini and Groq clients, cross-provider fallback, factory, test double
   api/             the HTTP adapter: five endpoints, a wire schema, sessions
 data/project_4.csv
-tests/             422 tests
+tests/             433 tests
 frontend/src/
   api/client.ts    the only module that speaks HTTP
   types/api.ts     the wire contract, mirroring app/api/schemas.py
@@ -284,6 +284,7 @@ leaves the previous dataset active.
 | `GEMINI_FALLBACK_MODEL` | none | optional second model, tried on a 429 or 503 |
 | `GEMINI_THINKING_LEVEL` | `MINIMAL` | how hard the model may reason before answering |
 | `LLM_PROVIDER` | `groq` | `groq` or `gemini`; both sit behind one `LLMClient` interface |
+| `LLM_FALLBACK_PROVIDER` | `gemini` | asked only when the primary provider cannot answer at all |
 | `GROQ_API_KEY` | - | required when the provider is `groq` |
 | `GROQ_MODEL` | `openai/gpt-oss-120b` | Groq planning model |
 
