@@ -84,18 +84,26 @@ Loaded project_4.csv: 10 transactions.
   Columns: id, date, region, product, units, unit_price, discount
   Dates:   2026-01-03 to 2026-03-04
   Missing: none
-  The file also carries 10 questions (/questions).
+  The file also carries 10 questions (/questions to list them, /ask 1 to run one).
 Ready. Ask a question, or /help for commands.
 
 > Which region has the highest total revenue?
 > How many transactions have a missing discount?
+> /ask 3                        the third question the file carries
+> 3                             the same thing, typed faster
 > /load path/to/another.csv
 > /exit
 ```
 
-Commands: `/help`, `/profile`, `/questions`, `/load <path>`, `/exit`. The
-dataset is loaded once and every question runs against it until you `/load`
-another.
+Commands: `/help`, `/profile`, `/questions`, `/ask <n>`, `/load <path>`,
+`/exit`. The dataset is loaded once and every question runs against it until
+you `/load` another.
+
+`/ask <n>` - or a bare number - runs the n-th question the *loaded file*
+carries, so the numbering follows whatever CSV is active and nothing about
+those questions exists in the code. The text is then asked through the same
+path a typed question takes, which is why `/ask 9` on the supplied dataset is
+still rejected by the prescreen rather than reaching the provider.
 
 ### The web interface
 
@@ -208,7 +216,7 @@ there being no expressible operation outside those six tools.
 ## Testing
 
 ```bash
-python -m pytest                   # 459 passed, 2 skipped (warnings are errors)
+python -m pytest                   # 468 passed, 2 skipped (warnings are errors)
 RUN_LIVE_LLM=1 python -m pytest    # also runs the two tests that call Gemini
 
 cd frontend
@@ -247,7 +255,7 @@ app/
   api/             the HTTP adapter: six endpoints, a wire schema, sessions,
                    and the built UI served from the same origin
 data/project_4.csv
-tests/             459 tests
+tests/             468 tests
 frontend/src/
   api/client.ts    the only module that speaks HTTP
   types/api.ts     the wire contract, mirroring app/api/schemas.py

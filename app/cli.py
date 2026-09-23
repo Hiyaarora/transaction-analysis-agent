@@ -27,6 +27,7 @@ _HELP = """Commands:
   /help              show this message
   /profile           describe the active dataset (columns, values, ranges, missing)
   /questions         list the questions embedded in the dataset file, if any
+  /ask <n>           ask question n from that list - or just type the number
   /load <path>       load a different dataset for the rest of the session
   /exit              end the session
 Anything else is treated as a question about the active dataset."""
@@ -65,6 +66,13 @@ def run(argv: list[str], stdin: TextIO, stdout: TextIO, llm: LLMClient | None = 
             if not keep_going:
                 return 0
             continue
+        # A bare number names one of the file's own questions. Nothing else is
+        # reinterpreted: "3" is not a question anybody could mean literally,
+        # and sending it to the planner would spend a call to be told so.
+        if _is_a_number(question):
+            _ask_numbered(question, agent, say)
+            say()
+            continue
         say(render(agent.ask(question), agent.dataset.profile))
         say()
     return 0
@@ -93,6 +101,8 @@ def _command(line: str, agent: Agent, say) -> bool:
                 say(f"  {number}. {question}")
         else:
             say("The dataset file contains no embedded questions.")
+    elif name == "/ask":
+        _ask_numbered(argument, agent, say)
     elif name == "/load":
         if not argument:
             say("Usage: /load <path to a .csv file>")
@@ -101,6 +111,47 @@ def _command(line: str, agent: Agent, say) -> bool:
     else:
         say(f"Unknown command '{name}'. Type /help for the list.")
     return True
+
+
+def _ask_numbered(argument: str, agent: Agent, say) -> None:
+    """Ask the question the active file carries at position `argument`.
+
+    The number is only a way of naming a question. Once resolved, the text
+    goes through the same `agent.ask` a typed question does - same prescreen,
+    same planner, same validation - so a question cannot reach the engine by a
+    different route for having been chosen from a list.
+
+    Nothing about the questions lives here: the list, its length and its
+    wording all come from whatever CSV is loaded now.
+    """
+    questions = agent.dataset.questions
+    if not questions:
+        say("The dataset file contains no embedded questions.")
+        return
+    if not argument:
+        say(f"Usage: /ask <number>, from 1 to {len(questions)}. Use /questions to see them.")
+        return
+    try:
+        number = int(argument)
+    except ValueError:
+        say(f"'{argument}' is not a question number. Use /questions to see the list.")
+        return
+    # Explicitly 1-based on both ends: /ask 0 and /ask -1 would otherwise be
+    # valid Python indices and quietly return the last question.
+    if not 1 <= number <= len(questions):
+        say(f"There is no question {number}. {agent.dataset.source_name} carries {len(questions)}.")
+        return
+
+    question = questions[number - 1]
+    say(f"Q{number}: {question}")  # the transcript should say what was asked
+    say(render(agent.ask(question), agent.dataset.profile))
+
+
+def _is_a_number(text: str) -> bool:
+    """Whether the whole line is an integer - including a negative one, so that
+    `/ask -1` and `-1` fail the same way rather than one of them being a
+    question about minus one."""
+    return text.removeprefix("-").isdigit()
 
 
 def _load(path: str, agent: Agent, say) -> None:
@@ -130,7 +181,10 @@ def _banner(dataset: ActiveDataset) -> str:
         unparsed = ", ".join(f"{column} ({count})" for column, count in profile.parse_error_counts.items())
         lines.append(f"  Unreadable values: {unparsed} (treated as missing)")
     if dataset.questions:
-        lines.append(f"  The file also carries {len(dataset.questions)} questions (/questions).")
+        lines.append(
+            f"  The file also carries {len(dataset.questions)} questions "
+            f"(/questions to list them, /ask 1 to run one)."
+        )
     return "\n".join(lines)
 
 
