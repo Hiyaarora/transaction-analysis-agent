@@ -1,168 +1,316 @@
 # Transaction Analysis Agent
 
-An agentic data-analysis tool that answers natural-language questions about a
-transaction dataset — where a language model decides **which operations** to
-run and Python does **all** of the arithmetic.
+A full-stack **agentic data-analysis application** that converts natural-language questions into a validated analysis plan and executes that plan with deterministic Python/Pandas operations.
 
-**Live demo:** _(add the Render URL here once deployed)_
+> **Core boundary:** the LLM understands the question and chooses operations; Python validates, executes, and computes the numbers.
 
-```
-> What is the total revenue for UK transactions?
+### Live Demo
 
-Answer:
-Sum of revenue for region UK: 4,320.00
+**Live URL:** **https://transaction-analysis-agent.onrender.com**
 
-Operations performed:
-1. Filtered transactions where region = UK (4 of 10 rows kept).
-2. Computed revenue for each of the 4 matching transactions (revenue = units * unit_price * (1 - discount)).
-3. Summed revenue over 4 matching transactions.
+Health check: [`/api/health`](https://transaction-analysis-agent.onrender.com/api/health)
 
-Explanation:
-The result was computed deterministically in Python from the active dataset
-(project_4.csv); the language model only chose which operations to run.
-```
+The service runs on Render's free tier, so two things are worth knowing before you open it:
 
-The model never sees a transaction row, never receives a file path, and never
-produces a number that reaches you. It returns a plan; Python validates it
-twice, executes it with pandas, and reports what it did.
-
-📄 **[ARCHITECTURE.md](ARCHITECTURE.md)** — the full walkthrough: every file, the
-execution flow, and the reasoning behind each decision.
+- It **sleeps after about 15 minutes** without traffic. The first visit after a quiet period takes roughly 30–60 seconds to wake — the page itself is served by the same service, so the wait happens while the tab is loading. The UI explains the wait if it happens mid-session rather than spinning silently.
+- **Session state is in memory.** A restart clears any loaded dataset; just load one again.
 
 ---
 
-## Tech stack
+## What it demonstrates
 
-| Layer | Choice |
+- Natural-language → structured `AnalysisPlan`
+- Six restricted deterministic tools: `filter_rows`, `compute_metric`, `aggregate`, `group_by`, `filter_groups`, `select_extreme`
+- Runtime discovery of dataset categories, dates, row counts, and missing values
+- Pydantic schema validation + semantic plan validation
+- Ambiguity → clarification; unsupported requests → rejection
+- No arbitrary Python, shell, filesystem, or secret-access capability
+- **Groq (`openai/gpt-oss-120b`) as default**, with Gemini as an automatic fallback
+- React + TypeScript UI with assessment questions and custom questions
+- CSV upload and dataset replacement
+- Cached answered questions
+- CLI + web UI using the same backend pipeline
+- 537 automated tests (475 backend, 62 frontend)
+
+📄 **[ARCHITECTURE.md](ARCHITECTURE.md)** — a detailed walkthrough of every file, the execution flow, and the reasoning behind each design decision.
+
+---
+
+## Architecture
+
+```text
+React + TypeScript UI / CLI
+             |
+             v
+        FastAPI API
+             |
+             v
+          Agent
+             |
+          Planner
+             |
+       LLMClient
+       /       \
+    Groq      Gemini
+             |
+        AnalysisPlan
+             |
+        schemas.py
+             |
+        validator.py
+             |
+         executor.py
+             |
+           tools.py
+             |
+        Pandas/DataFrame
+             |
+        ExecutionResult
+             |
+        renderer.py
+             |
+        User-facing result
+```
+
+### End-to-end flow
+
+1. The user asks a question.
+2. A pre-screen stops obvious code/file/secret requests before any API call is made.
+3. The planner receives the question plus dataset metadata—not transaction rows or file paths.
+4. The LLM returns a structured `AnalysisPlan`.
+5. `schemas.py` checks the plan structure.
+6. `validator.py` checks whether the plan is valid for the active dataset and workflow.
+7. `executor.py` runs only the approved tools.
+8. Pandas computes the actual result.
+9. `renderer.py` presents the result and recorded operations.
+
+---
+
+## Project structure
+
+```text
+transaction-analysis-agent/
+├── app/
+│   ├── contract.py       Domain vocabulary and derived metrics
+│   ├── config.py         Environment/configuration
+│   ├── data_loader.py    CSV → ActiveDataset
+│   ├── data_profile.py   Runtime dataset profile
+│   ├── schemas.py        AnalysisPlan models
+│   ├── validator.py      Semantic validation
+│   ├── tools.py          Deterministic Pandas tools
+│   ├── executor.py       Plan execution
+│   ├── renderer.py       Result → readable output
+│   ├── planner.py        Question → AnalysisPlan
+│   ├── prescreen.py      Early cost-saving filter
+│   ├── agent.py          Pipeline orchestration
+│   ├── cli.py            Interactive terminal session
+│   ├── llm/
+│   │   ├── base.py       LLMClient interface
+│   │   ├── fake.py       Test double
+│   │   ├── groq.py       Groq provider
+│   │   ├── gemini.py     Gemini provider
+│   │   ├── chain.py      Cross-provider fallback
+│   │   └── factory.py    Provider selection
+│   └── api/              FastAPI routes, wire schemas, sessions, static serving
+├── frontend/             React + TypeScript UI
+├── data/
+│   └── project_4.csv
+├── tests/
+├── run.py                CLI entry point
+├── run_api.py            FastAPI entry point
+├── render.yaml           Render deployment config
+├── .python-version       Pinned interpreter
+└── ARCHITECTURE.md       Design document
+```
+
+---
+
+## Deterministic tool layer
+
+The LLM can only express operations through six approved tools:
+
+| Tool | Purpose |
 |---|---|
-| Backend | Python 3.12, FastAPI, pandas, Pydantic |
-| Frontend | React 19, TypeScript, Vite, Tailwind CSS v4 |
-| LLM (default) | **Groq** — `openai/gpt-oss-120b` |
-| LLM (fallback) | **Gemini** — `gemini-3.6-flash` |
-| Tests | pytest (475), Vitest (62) |
-| Deployment | Render — one web service, FastAPI serves the API and the built UI |
+| `filter_rows` | Filter transactions using validated columns/operators |
+| `compute_metric` | Compute derived metrics such as revenue |
+| `aggregate` | Calculate `sum`, `mean`, `median`, `min`, `max`, or `count` |
+| `group_by` | Group transactions and calculate an aggregate per group |
+| `filter_groups` | Filter grouped results using validated comparisons |
+| `select_extreme` | Select the highest/lowest group or value |
 
-**Why Groq is the default:** on the ten questions the dataset carries, with every
-answer checked against pandas — Groq answered 10/10 at a **1.2 s median**, Gemini
-10/10 at **30.2 s**. Gemini is asked only when Groq cannot answer at all (out of
-quota, or unreachable). Validation and execution take under 10 ms; effectively
-all latency is the provider's.
+No tool accepts arbitrary Python code, shell commands, file paths, or expressions outside the allowed operation set.
 
 ---
 
-## Running it
+## Data-driven behavior
+
+The application does **not** hardcode transaction values, category names, dates, row counts, or answers.
+
+The active CSV is profiled at runtime. A different valid CSV can be loaded with different data values and categories without changing the analysis code.
+
+The UI supports:
+
+- **Assessment dataset** — use the bundled `project_4.csv`
+- **Custom CSV upload** — replace the active dataset
+- **Assessment questions** — shown dynamically when a question set is available
+- **Custom questions** — any supported natural-language analysis question
+- **Download** — the active CSV can be downloaded to verify any answer by hand
+
+A CSV **with** a `question` column has those rows set aside as the question list and excluded from every calculation. A CSV **without** one loads normally with an empty question list — ask your own questions instead.
+
+---
+
+## Example interactions
+
+```text
+"What is the total discounted revenue for Gamma?"
+→ Planned → validated → executed → result returned
+
+"Read a secret value from the machine."
+→ Rejected
+```
+
+The pre-screen is only an early cost-saving filter. The real safety boundary is the **closed plan schema + semantic validator + restricted executor/tools**.
+
+---
+
+## Running locally
 
 ### 1. Setup
 
-Needs Python 3.12 and a **Groq API key**
-([free, no card](https://console.groq.com/keys)).
+Requirements:
+- Python 3.12
+- Node.js/npm for the web UI
+- A Groq API key
 
 ```bash
 python -m venv .venv
-.venv\Scripts\activate           # Windows;  source .venv/bin/activate elsewhere
-pip install -r requirements.txt
-
-cp .env.example .env             # then put your key in GROQ_API_KEY
 ```
 
-> On Windows, if `activate` is blocked by the execution policy, just call the
-> interpreter directly: `.venv\Scripts\python.exe run.py ...`
+Activate the environment:
 
-### 2. In the terminal
+```bash
+# Windows
+.venv\Scripts\activate
+
+# macOS / Linux
+source .venv/bin/activate
+```
+
+> On Windows, if PowerShell blocks `activate` with an execution-policy error, call the interpreter directly instead: `.venv\Scripts\python.exe run.py ...`
+
+Install backend dependencies and configure the environment:
+
+```bash
+pip install -r requirements.txt
+cp .env.example .env
+```
+
+Then add your key to `.env`:
+
+```text
+LLM_PROVIDER=groq
+GROQ_MODEL=openai/gpt-oss-120b
+GROQ_API_KEY=<your-key>
+```
+
+Never commit API keys.
+
+### 2. Run the CLI
 
 ```bash
 python run.py --data data/project_4.csv
 ```
 
+Useful CLI commands:
+
+```text
+/questions                  list available assessment questions
+/ask 3                      ask question 3
+3                           the same thing, typed faster
+/profile                    show the active dataset profile
+/load path/to/another.csv   replace the active dataset
+/exit                       close the session
 ```
-> Which region has the highest total revenue?      ask anything
-> /questions                                       list the questions in the file
-> /ask 3                                           ask the third one
-> 3                                                the same, typed faster
-> /profile                                         what was discovered in the data
-> /load path/to/another.csv                        switch datasets
-> /exit
-```
 
-`Thinking / 4s` appears on one line while the model plans, and is erased before
-the answer.
+Anything that is not a command is treated as a question. While the model plans, the terminal shows `Thinking / 4s` on one line, erased before the answer appears.
 
-### 3. In the browser
+### 3. Run the web UI locally
 
-Two terminals — the API, and the Vite dev server which proxies `/api` to it:
+Start the API in one terminal:
 
 ```bash
-python run_api.py                             # terminal 1 → http://127.0.0.1:8000
-cd frontend && npm install && npm run dev     # terminal 2 → http://localhost:5173
+python run_api.py
 ```
 
-Open **http://localhost:5173**.
+The API runs at:
 
-To run it exactly as deployed — one port, no Vite:
+```text
+http://127.0.0.1:8000
+```
+
+Start the React/Vite frontend in a second terminal:
 
 ```bash
-cd frontend && npm run build && cd ..
-python run_api.py                             # http://localhost:8000 serves both
+cd frontend
+npm install
+npm run dev
 ```
 
-### 4. Tests
+Open:
+
+```text
+http://localhost:5173
+```
+
+### 4. Run like the deployed app
+
+Build the frontend and let FastAPI serve the production build from the same service:
 
 ```bash
-python -m pytest                   # 475 passed, 2 skipped
-cd frontend && npx vitest run      # 62 passed
+cd frontend
+npm install
+npm run build
+cd ..
+python run_api.py
 ```
+
+Then open `http://localhost:8000`.
 
 ---
 
-## What you can do with it
+## Testing
 
-**Use the supplied dataset.** `data/project_4.csv` carries ten evaluation
-questions inside the file itself. Step through them in the UI, or `/ask 1` in
-the terminal.
+Backend tests:
 
-**Upload your own CSV.** Any file with the required columns works — see the data
-contract below. Two cases, both handled:
+```bash
+pytest -W error
+```
 
-| Your file | What happens |
-|---|---|
-| **With** a `question` column | Those rows are set aside as a question list and shown for you to step through. They are excluded from every calculation. |
-| **Without** questions | Loads normally; the question list is simply empty. Ask your own. |
+Frontend tests:
 
-**Ask anything you like.** Free-text questions go to the same engine as the
-built-in ones. Nothing in the code keys off question wording.
+```bash
+cd frontend
+npx vitest run
+```
 
-**Swap in different data.** Same columns, different regions, products, dates and
-numbers — the same binary answers questions about it, because category values,
-ranges and row counts are all discovered at load time. It will also correctly
-refuse values that no longer exist in your file.
+Tests cover the loader/profile, tools, schemas, validator, planner/provider abstraction, execution, renderer, CLI, API, static serving, ambiguity/rejection, and dataset replacement.
 
-**Download what is loaded.** The dataset tile is a download button, so you can
-open the active CSV in a spreadsheet and check any answer by hand.
-
-### Questions it handles
-
-Aggregates and averages · counts · grouped statistics · extremes ("which region
-is highest") · grouped filters ("which regions have more than 5 transactions")
-· date ranges · numeric comparisons · missing-value questions.
-
-These are examples, not a list of supported sentences.
+Almost every test runs with no network and no API key: a `FakeLLMClient` returns scripted plans and records what it was asked, so a failing test means Python misbehaved rather than that a model phrased something differently. No expected answer is a literal from the supplied file — end-to-end tests compute their expectation with plain pandas over whatever CSV is in `data/`.
 
 ---
 
-## The data contract
+## Data contract
 
-Required columns: `id`, `date` (ISO `YYYY-MM-DD` only), `region`, `product`,
-`units`, `unit_price`, `discount` (a **fraction** — `0.20` means 20 %). A file
-missing any of them is rejected with a message naming what is missing.
+Required columns: `id`, `date` (ISO `YYYY-MM-DD`), `region`, `product`, `units`, `unit_price`, `discount` (`0.20` means 20%).
 
-```
+Derived revenue:
+
+```text
 revenue = units * unit_price * (1 - discount)
 ```
 
-Extra columns are loaded and reported, but not analysable. Missing values are
-skipped and **counted**, never zero-filled — an answer says *"computed from 9 of
-the 10 matching transactions"* rather than quietly averaging over nine while
-claiming ten.
+Extra columns are loaded and reported but are not automatically analysable. Missing values are skipped and counted rather than silently zero-filled.
 
 ---
 
@@ -170,63 +318,60 @@ claiming ten.
 
 | Situation | Behaviour |
 |---|---|
-| Invented column or metric (`profit`) | Rejected, naming what is supported |
-| Unknown category (`Britain`) | Rejected with the real values — synonyms are never mapped |
-| A real value the question never named (`Germany` → `DE`) | Clarification requested, not assumed |
-| Near miss (`Gama`) | "Did you mean 'Gamma'?" |
-| Ambiguous wording ("in Mars") | Clarification requested, not guessed |
-| Code execution, file access, secrets | Rejected before the model is called |
-| A jailbroken model returning `{"tool": "run_shell"}` | No such tool exists — the plan fails validation and nothing runs |
-| Dates outside the data | A valid question: answered "no data", with the real range |
+| Invented column or metric (`profit`) | Rejected |
+| Unknown category (`Britain`) | Rejected with the real valid values |
+| A real value the question never named (`Germany` planned as `DE`) | Clarification requested, not assumed |
+| Near miss (`Gama`) | Clarification requested |
+| Ambiguous wording | Clarification requested, not guessed |
+| Code execution, file access, secrets | Rejected |
+| Invalid model-generated tool/step | Fails schema/semantic validation; nothing executes |
+| Dates outside the active dataset range | Valid plan; returns no data and reports the actual range |
 
-Safety does not rest on the pre-screen or on the model behaving. It rests on
-there being **no expressible operation outside six pure functions**. A test
-asserts the `app/` package contains no `eval`, `exec`, `compile`,
-`__import__`, `subprocess`, `os.system`, `pickle` or `shutil`, and that only
-the data loader opens files.
+Safety does not rely on the model behaving correctly. The executable surface is limited to the validated plan and six deterministic tools.
 
 ---
 
 ## Configuration
 
-Everything lives in `.env` (see `.env.example`). The API key is read by the
-server only — it is never sent to the browser.
+Everything lives in `.env` (see `.env.example`). The API key is read by the server only and is never sent to the browser.
 
 | Variable | Default | Purpose |
 |---|---|---|
 | `LLM_PROVIDER` | `groq` | `groq` or `gemini` |
-| `GROQ_API_KEY` | – | required when the provider is `groq` |
-| `GROQ_MODEL` | `openai/gpt-oss-120b` | planning model |
-| `LLM_FALLBACK_PROVIDER` | `gemini` | asked only when the primary cannot answer at all |
-| `GEMINI_API_KEY` | – | required for the fallback to be active |
-| `GEMINI_MODEL` | `gemini-3.6-flash` | planning model |
-| `GEMINI_API_KEY_2` | – | optional second key, tried on a 429 |
-| `GEMINI_FALLBACK_MODEL` | `gemini-3.5-flash-lite` | tried on a 503 |
-| `GEMINI_THINKING_LEVEL` | `MINIMAL` | planning is translation, not reasoning |
+| `GROQ_API_KEY` | – | Required when using Groq |
+| `GROQ_MODEL` | `openai/gpt-oss-120b` | Planning model |
+| `LLM_FALLBACK_PROVIDER` | `gemini` | Asked only when the primary provider cannot answer at all |
+| `GEMINI_API_KEY` | – | Required for the fallback (or when using Gemini directly) |
+| `GEMINI_MODEL` | `gemini-3.6-flash` | Planning model |
+| `GEMINI_FALLBACK_MODEL` | `gemini-3.5-flash-lite` | Tried when the primary model is saturated |
+| `GEMINI_THINKING_LEVEL` | `MINIMAL` | Planning is translation, not reasoning |
+
+**Why Groq is the default:** measured on the ten questions the dataset carries, with every answer checked against pandas — Groq answered 10/10 at a 1.2 s median; Gemini answered 10/10 at 30.2 s. Validation and execution together take under 10 ms, so effectively all latency is the provider's.
 
 ---
 
 ## Deployment
 
-One Render web service: FastAPI serves `/api/*` and, from the same origin, the
-React production build. `render.yaml` holds the whole configuration — build
-command, start command, health check and environment. The two API keys are
-marked `sync: false`, so Render prompts for them and they never enter the
-repository.
+The app is designed as **one Render Web Service** so the evaluator receives a single URL:
 
-Being a free single-instance demo, it **sleeps after ~15 minutes idle** (the
-first request back pays a 30–60 s cold start, which the UI explains rather than
-spinning silently), **sessions do not survive a restart**, and **uploads are not
-persisted**. Details and the reasoning are in
-[ARCHITECTURE.md](ARCHITECTURE.md#5-deployment-shape).
+```text
+Browser
+  ↓
+Render
+  ├── React production build
+  └── /api/* → FastAPI → Agent → LLM provider
+```
+
+The API router is registered before the static handler, so no static route can shadow an endpoint; an unknown path falls back to `index.html` for the SPA, except under `/api`, where a missing endpoint stays a JSON 404. Serving the UI from the same origin as the API is also why there is no CORS configuration in production.
+
+Uploaded CSVs are temporary and loaded into memory — the server names its own temp file and deletes it as soon as the loader has read it, after a failure as well as a success. Session state is in memory, so a service restart starts a fresh session.
 
 ---
 
-## Limitations
+## Tech stack
 
-* Plan quality depends on the model. The architecture guarantees a bad plan is
-  *rejected* — not that every question produces one.
-* Answers are single values, grouped values or an extreme. The agent does not
-  list matching transactions.
-* Free-tier quotas apply to both providers. When both are exhausted, questions
-  return an honest `Status: Error` rather than a fabricated answer.
+**Frontend:** React, TypeScript, Vite, Tailwind CSS  
+**Backend:** Python, FastAPI, Uvicorn, Pandas, Pydantic  
+**LLM:** Groq (`openai/gpt-oss-120b`), Gemini fallback  
+**Testing:** pytest, Vitest, FakeLLMClient  
+**Deployment:** Render
