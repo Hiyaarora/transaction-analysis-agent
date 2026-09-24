@@ -25,7 +25,7 @@ Health check: [`/api/health`](https://transaction-analysis-agent.onrender.com/ap
 - CLI + web UI using the same backend pipeline
 - 537 automated tests (475 backend, 62 frontend)
 
-📄 **[ARCHITECTURE.md](ARCHITECTURE.md)** — a detailed walkthrough of every file, the execution flow, and the reasoning behind each design decision.
+📄 **[ARCHITECTURE.md](ARCHITECTURE.md)** — the full project document: architecture, end-to-end flow, component roles, the restricted tool layer, guardrails, worked examples from the supplied assessment, and the key design choices.
 
 ---
 
