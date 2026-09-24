@@ -10,13 +10,6 @@ A full-stack **agentic data-analysis application** that converts natural-languag
 
 Health check: [`/api/health`](https://transaction-analysis-agent.onrender.com/api/health)
 
-The service runs on Render's free tier, so two things are worth knowing before you open it:
-
-- It **sleeps after about 15 minutes** without traffic. The first visit after a quiet period takes roughly 30–60 seconds to wake — the page itself is served by the same service, so the wait happens while the tab is loading. The UI explains the wait if it happens mid-session rather than spinning silently.
-- **Session state is in memory.** A restart clears any loaded dataset; just load one again.
-
----
-
 ## What it demonstrates
 
 - Natural-language → structured `AnalysisPlan`
